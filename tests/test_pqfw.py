@@ -400,3 +400,140 @@ def test_a5_recipient_key_signs_record(env, tmp_path):
         {**r.record.to_dict(), "recipient_user_id": "alice"})
     assert not verify(carol.sig_public, tampered.canonical_bytes(),
                       r.signed.signature)
+
+
+# ------------------------------------------------- A8: multi-node gossip
+
+def _mk_signed(i, who, sk, pk):
+    rec = DecryptionRecord(
+        session_id=f"s{i}", doc_id="d", doc_hash=sha256(b"d"),
+        recipient_fingerprint=f"fp{i}", recipient_user_id=who,
+        watermark_commitment=sha256(bytes([i])), watermark_seed=bytes([i]) * 32,
+        n_bits=64, user_index=i, n_users=4)
+    return SignedRecord(record=rec, signature=sign(sk, rec.canonical_bytes()),
+                        sig_public=pk)
+
+
+def _forked_pair(tmp_path, tail_x="carol", tail_y="dave", extra_x=0):
+    """Build two nodes sharing a prefix then diverging -- a real split view.
+
+    Both halves are internally perfect: every record hashes correctly and every
+    tree head verifies. Only cross-node comparison can expose the fork.
+    """
+    import shutil
+    pk, sk = sig_keygen()
+    a = LedgerNode(tmp_path / "A.db", "node-A")
+    for i in range(3):
+        a.append(_mk_signed(i, f"user{i}", sk, pk))
+    a.close()
+    shutil.copy(tmp_path / "A.db", tmp_path / "F.db")
+    x = LedgerNode(tmp_path / "A.db", "node-A")
+    y = LedgerNode(tmp_path / "F.db", "node-A")
+    x.append(_mk_signed(3, tail_x, sk, pk))
+    for j in range(extra_x):
+        x.append(_mk_signed(4 + j, f"extra{j}", sk, pk))
+    y.append(_mk_signed(3, tail_y, sk, pk))
+    return x, y
+
+
+def test_a8_gossip_accepts_honest_peer_behind(tmp_path):
+    """A peer that is simply lagging must verify by consistency proof."""
+    import shutil
+    from pqfw.ledger import gossip
+    pk, sk = sig_keygen()
+    a = LedgerNode(tmp_path / "A.db", "node-A")
+    for i in range(4):
+        a.append(_mk_signed(i, f"user{i}", sk, pk))
+    a.close()
+    shutil.copy(tmp_path / "A.db", tmp_path / "B.db")
+    b = LedgerNode(tmp_path / "B.db", "node-B")
+    a = LedgerNode(tmp_path / "A.db", "node-A")
+    a.append(_mk_signed(4, "user4", sk, pk))
+
+    r = gossip.compare(a, gossip.export_sth(b))
+    assert r.agreement is gossip.Agreement.CONSISTENT
+    assert r.proof_checked, "must be proven, not merely assumed"
+
+
+def test_a8_gossip_detects_split_view_same_size(tmp_path):
+    """Equivocation at equal tree size: same size, different roots."""
+    from pqfw.ledger import gossip
+    x, y = _forked_pair(tmp_path)
+
+    # each branch passes its OWN integrity check -- that is the whole point
+    assert not x.detect_tamper()[0]
+    assert not y.detect_tamper()[0]
+    assert x.size() == y.size() and x.root() != y.root()
+
+    r = gossip.compare(x, gossip.export_sth(y))
+    assert r.agreement is gossip.Agreement.SPLIT_VIEW
+
+
+def test_a8_gossip_detects_fork_disguised_as_lag(tmp_path):
+    """A fork at unequal sizes must not pass as an honest peer-behind."""
+    from pqfw.ledger import gossip
+    x, y = _forked_pair(tmp_path, extra_x=1)
+    assert x.size() > y.size()          # looks like y is merely behind
+    r = gossip.compare(x, gossip.export_sth(y))
+    assert r.agreement is gossip.Agreement.SPLIT_VIEW
+    assert r.proof_checked
+
+
+def test_a8_gossip_rejects_forged_sth(tmp_path):
+    from pqfw.ledger import gossip
+    x, y = _forked_pair(tmp_path)
+    s = gossip.export_sth(y)
+    s.signature = b"\x00" * 3309
+    assert gossip.compare(x, s).agreement is gossip.Agreement.FORGED_STH
+
+
+def test_a8_gossip_pins_log_identity(tmp_path):
+    """An STH from a different log is not evidence about this one."""
+    from pqfw.ledger import gossip
+    pk, sk = sig_keygen()
+    x = LedgerNode(tmp_path / "X.db", "node-X")
+    x.append(_mk_signed(0, "a", sk, pk))
+    z = LedgerNode(tmp_path / "Z.db", "node-Z")
+    z.append(_mk_signed(0, "z", sk, pk))
+    r = gossip.compare(x, gossip.export_sth(z), expect_node_public=x.public_key)
+    assert r.agreement is gossip.Agreement.UNRELATED
+
+
+def test_a8_gossip_sth_survives_file_transfer(tmp_path):
+    """STHs must move across an air gap as files, not just over a socket."""
+    from pqfw.ledger import gossip
+    x, y = _forked_pair(tmp_path)
+    p = tmp_path / "peer-sth.json"
+    gossip.export_sth(y, p)
+    loaded = gossip.load_sth(p)
+    assert loaded.verify_signature()
+    assert gossip.compare(x, loaded).agreement is gossip.Agreement.SPLIT_VIEW
+
+
+def test_a8_quorum_one_split_condemns(tmp_path):
+    """Consistency is not a majority vote: one valid proof of equivocation wins."""
+    from pqfw.ledger import gossip
+    x, y = _forked_pair(tmp_path)
+    honest = gossip.compare(x, gossip.export_sth(x))
+    split = gossip.compare(x, gossip.export_sth(y))
+    ok, msg = gossip.quorum_view([honest, honest, honest, split])
+    assert not ok and "SPLIT VIEW" in msg
+
+
+def test_a8_self_comparison_is_not_corroboration(tmp_path):
+    """A node agreeing with itself must not be reported as peer agreement.
+
+    A split-view attacker always agrees with itself; counting that as
+    corroboration would give an auditor false confidence.
+    """
+    from pqfw.ledger import gossip
+    pk, sk = sig_keygen()
+    n = LedgerNode(tmp_path / "A.db", "node-A")
+    n.append(_mk_signed(0, "a", sk, pk))
+
+    r = gossip.compare(n, gossip.export_sth(n))
+    assert r.agreement is gossip.Agreement.CONSISTENT
+    assert "not independent" in r.detail
+
+    ok, msg = gossip.quorum_view([r])
+    assert ok and "cannot detect equivocation" in msg

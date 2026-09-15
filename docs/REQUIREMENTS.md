@@ -8,7 +8,7 @@ reason stated openly rather than quietly reinterpreted.
 Status: ✅ = implemented **and** covered by a passing test.
 
 **All 14 key requirements, all 10 workflow steps, and the deployment constraint
-are implemented and tested.** `python -m pytest tests/ -q` → 23 passed.
+are implemented and tested.** `python -m pytest tests/ -q` → 33 passed.
 
 ---
 
@@ -22,8 +22,8 @@ are implemented and tested.** `python -m pytest tests/ -q` → 23 passed.
 | A4 | Cryptographically bind each decryption event to the recipient's identity | Record includes recipient pubkey hash + doc hash + wm hash | `test_a4_record_binds_who_what_which_when` | ✅ |
 | A5 | Use the recipient's own private key to generate a digital signature for the decryption record | `crypto/sig.py`, recipient's ML-DSA secret key | `test_a5_recipient_key_signs_record` | ✅ |
 | A6 | Use NIST-standardized PQC algorithms instead of classical, for **Key Exchange and Digital Signatures** | ML-KEM-768 (FIPS 203) + ML-DSA-65 (FIPS 204) | `test_a6_uses_nist_pqc_algorithms`, `test_no_classical_public_key_crypto` | ✅ |
-| A7 | Implement the immutable audit layer using blockchain or DLT | CT-style Merkle log (RFC 6962/9162) | `test_a7_inclusion_proofs_exhaustive`, `test_a8_consistency_proofs_exhaustive` | ✅ |
-| A8 | Ensure no single administrator or compromised account can retroactively modify or delete audit records | Consistency proofs + signed STH + per-record signature check | `test_a8_admin_modification_detected`, `test_a8_deletion_detected`, `test_a8_consistency_rejects_rewritten_history`, `test_a8_forged_record_rejected_at_append` | ✅ |
+| A7 | Implement the immutable audit layer using blockchain or DLT | CT-style Merkle log (RFC 6962/9162), multi-node | `test_a7_inclusion_proofs_exhaustive`, `test_a8_consistency_proofs_exhaustive` | ✅ |
+| A8 | Ensure no single administrator or compromised account can retroactively modify or delete audit records | Consistency proofs + signed STH + per-record signature check + multi-node gossip | `test_a8_admin_modification_detected`, `test_a8_deletion_detected`, `test_a8_consistency_rejects_rewritten_history`, `test_a8_forged_record_rejected_at_append`, `test_a8_gossip_detects_split_view_same_size`, `test_a8_gossip_detects_fork_disguised_as_lag` | ✅ |
 | A9 | Extract the forensic watermark from a leaked document | `watermark/extract.py` | `test_b7_to_b10_full_attribution`, `test_unwatermarked_document_accuses_nobody` | ✅ |
 | A10 | Look up the extracted watermark against the immutable ledger | `forensics/investigate.py` | `test_b7_to_b10_full_attribution` | ✅ |
 | A11 | Return a cryptographically verifiable record identifying the recipient | Verdict = record + sig + inclusion proof + STH | `test_b7_to_b10_full_attribution`, `test_compromised_ledger_withholds_attribution` | ✅ |
@@ -63,11 +63,27 @@ are implemented and tested.** `python -m pytest tests/ -q` → 23 passed.
 **Enforcement:** `test_a12_a14_no_network_calls` monkeypatches `socket.socket` to raise,
 then runs the full pipeline. Any outbound connection fails the suite.
 
-### Not implemented
+### Multi-node gossip (A8, equivocation defence)
 
-| Item | Status | Note |
+| Attack | Caught by | Test |
 |---|---|---|
-| Multi-node STH gossip / split-view detection | ❌ not built | Single-node tamper detection is implemented and tested. Cross-node gossip was planned but is not in this build; do not claim it. A8 is satisfied without it: modification, deletion and forged-signature attacks are all caught on one node, including when the attacker recomputes hashes and wipes the STH table. |
+| Two views, same tree size, different roots | root comparison | `test_a8_gossip_detects_split_view_same_size` |
+| Fork disguised as an honest lagging peer | consistency proof | `test_a8_gossip_detects_fork_disguised_as_lag` |
+| Fabricated tree head | ML-DSA signature check | `test_a8_gossip_rejects_forged_sth` |
+| STH from an unrelated log offered as evidence | node-key pinning | `test_a8_gossip_pins_log_identity` |
+| Node "corroborating" itself | self-comparison guard | `test_a8_self_comparison_is_not_corroboration` |
+
+Single-node `detect_tamper()` catches an admin who *edits* a database. It cannot
+catch one who edits nothing and instead shows different histories to different
+auditors — each view internally perfect. That is the split-view attack, and
+cross-node STH comparison is the only thing that closes it.
+
+STHs move over the LAN **or as files** (`ledger publish-sth` → USB →
+`ledger gossip`), so the defence works inside an air gap.
+
+One irreconcilable peer condemns the log: consistency is not a majority vote,
+and a valid proof of equivocation stands however many nodes agree with each
+other.
 
 ---
 

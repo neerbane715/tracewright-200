@@ -63,6 +63,11 @@ any perceptually safe signal.
 `c²·ln(n/ε)` bound. Documents too short to carry a full codeword are refused
 rather than half-marked.
 
+**Split-view detection.** Nodes exchange signed tree heads, over the LAN or on a
+USB stick. Two STHs from one log must either match or be reconcilable by a
+consistency proof; anything else is non-repudiable proof the log equivocated,
+since both carry the node's own ML-DSA signature.
+
 **The ledger** is a Certificate-Transparency-style append-only Merkle log
 (RFC 6962, verification per RFC 9162). Not a blockchain: consensus among
 strangers is the wrong primitive when every participant already holds a strong
@@ -81,7 +86,7 @@ consistency proofs provide exactly that.
 | Destroyed by | screenshot, print-to-PDF, copy-paste |
 | ML-KEM encapsulation, 100 recipients | 0.37 s |
 | ML-DSA sign / verify | 38 ms / 10 ms |
-| Tests | 25 passing |
+| Tests | 33 passing |
 
 ## Limits, stated plainly
 
@@ -96,10 +101,9 @@ consistency proofs provide exactly that.
 - **Signatures prove key possession, not human intent.** Non-repudiation here is
   a legal-procedural property resting on key-custody obligations, not a
   mathematical one.
-- **Multi-node gossip is not implemented.** Tamper detection is single-node. It
-  catches modification, deletion, reordering, and forged signatures — including
-  an attacker who recomputes hashes and wipes the tree heads — but cross-node
-  split-view detection was scoped out.
+- **Gossip requires at least two honest nodes.** Split-view detection compares
+  tree heads across nodes; a single node cannot detect its own equivocation, and
+  the system says so rather than reporting false confidence.
 
 ## Layout
 

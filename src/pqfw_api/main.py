@@ -20,6 +20,7 @@ from pqfw import pipeline
 from pqfw.forensics.investigate import investigate
 from pqfw.identity import Keystore
 from pqfw.ledger.node import LedgerNode
+from pqfw.ledger import gossip as gsp
 from pqfw.watermark import engine, tardos
 
 DEMO = Path(__file__).parent.parent.parent / "demo"
@@ -164,6 +165,33 @@ def api_proof(index: int):
     return {"index": index, "tree_size": p["tree_size"],
             "root": p["root"].hex(),
             "path": [h.hex() for h in p["proof"]]}
+
+
+@app.get("/api/ledger/sth")
+def api_sth():
+    """This node's signed tree head, for a peer to compare against."""
+    try:
+        return gsp.export_sth(led()).to_dict()
+    except ValueError as e:
+        raise HTTPException(409, str(e))
+
+
+class GossipBody(BaseModel):
+    peers: list[dict]
+
+
+@app.post("/api/ledger/gossip")
+def api_gossip(body: GossipBody):
+    """Compare peer tree heads against ours; detects a split view."""
+    try:
+        peers = [gsp.STH.from_dict(p) for p in body.peers]
+    except Exception as e:
+        raise HTTPException(400, f"malformed peer STH: {e}")
+    L = led()
+    results = gsp.audit(L, peers)
+    ok, msg = gsp.quorum_view(results)
+    return {"ok": ok, "summary": msg,
+            "results": [r.to_dict() for r in results]}
 
 
 class TamperBody(BaseModel):

@@ -17,6 +17,7 @@ from . import pipeline
 from .forensics.investigate import Outcome, investigate
 from .identity import Keystore
 from .ledger.node import LedgerNode
+from .ledger import gossip as gsp
 from .watermark import engine, tardos
 
 app = typer.Typer(add_completion=False, help=__doc__)
@@ -200,6 +201,41 @@ def ledger_verify(home: Path = typer.Option(DEFAULT_HOME, "--home")):
         f"STH sig   : ML-DSA-65, {len(sth['signature'])} bytes "
         f"[green]verified[/]" if led.verify_sth(sth) else "[red]INVALID[/]",
         border_style="green"))
+
+
+@ledger_app.command("publish-sth")
+def ledger_publish(out: Path = typer.Argument(..., help="file to write"),
+                   home: Path = typer.Option(DEFAULT_HOME, "--home")):
+    """Export this node's signed tree head for peers (works over USB)."""
+    sth = gsp.export_sth(_led(home), out)
+    con.print(f"[green]published[/] tree head -> {out}")
+    con.print(f"  size {sth.tree_size}  root [cyan]{sth.root.hex()}[/]")
+
+
+@ledger_app.command("gossip")
+def ledger_gossip(peers: list[Path] = typer.Argument(..., help="peer STH files"),
+                  home: Path = typer.Option(DEFAULT_HOME, "--home")):
+    """Compare peer tree heads against ours to detect a split view."""
+    led = _led(home)
+    results = gsp.audit(led, [gsp.load_sth(p) for p in peers])
+
+    t = Table("peer", "size", "agreement", "proven")
+    for r in results:
+        colour = {"CONSISTENT": "green", "SPLIT_VIEW": "red",
+                  "FORGED_STH": "red", "UNRELATED": "yellow"}[r.agreement.value]
+        t.add_row(r.remote.node_id if r.remote else "?",
+                  str(r.remote.tree_size) if r.remote else "-",
+                  f"[{colour}]{r.agreement.value}[/]",
+                  "yes" if r.proof_checked else "[dim]no[/]")
+    con.print(t)
+
+    ok, msg = gsp.quorum_view(results)
+    head = ("[green]all views reconcile[/]" if ok
+            else "[bold red]LEDGER EQUIVOCATED[/]")
+    con.print(Panel(head + "\n" + msg,
+                    border_style="green" if ok else "red"))
+    if not ok:
+        raise typer.Exit(2)
 
 
 if __name__ == "__main__":
