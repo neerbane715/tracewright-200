@@ -14,3 +14,6 @@ demo/
 pqfw-data/
 *.pqfw
 secret.json
+spike/out/
+web/node_modules/
+web/dist/
