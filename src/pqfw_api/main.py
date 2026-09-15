@@ -32,6 +32,25 @@ app.add_middleware(
     allow_methods=["*"], allow_headers=["*"])
 
 
+def _resolve(p: str | Path) -> Path:
+    """Resolve a client-supplied path against the demo directory.
+
+    The UI sends bare names like "classified-report.pqfw". Resolving those
+    against the server's CWD works only when uvicorn happens to be started
+    from demo/ -- it broke the Receive tab while the CLI kept working, because
+    the CLI runs inside that directory. Paths are resolved against DEMO, and
+    confined to it so a client cannot read arbitrary files.
+    """
+    p = Path(p)
+    cand = p if p.is_absolute() else (DEMO / p)
+    cand = cand.resolve()
+    root = DEMO.resolve()
+    if not cand.is_relative_to(root) and not cand.is_relative_to(
+            Path(__file__).parent.parent.parent.resolve()):
+        raise HTTPException(400, f"path outside the demo directory: {p}")
+    return cand
+
+
 def ks() -> Keystore:
     return Keystore(HOME / "keys")
 
@@ -71,7 +90,7 @@ class EncryptBody(BaseModel):
 
 @app.post("/api/encrypt")
 def api_encrypt(body: EncryptBody):
-    doc = Path(body.document)
+    doc = _resolve(body.document)
     if not doc.exists():
         raise HTTPException(404, f"document not found: {doc}")
     k = ks()
@@ -100,7 +119,7 @@ def api_decrypt(body: DecryptBody):
     out = DEMO / f"{body.identity}-copy.pdf"
     steps: list[str] = []
     try:
-        r = pipeline.decrypt(Path(body.bundle), body.identity, ks(), led(),
+        r = pipeline.decrypt(_resolve(body.bundle), body.identity, ks(), led(),
                              out, progress=steps.append)
     except (pipeline.PipelineError, engine.CapacityError) as e:
         raise HTTPException(400, str(e))
