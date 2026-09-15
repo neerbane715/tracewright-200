@@ -124,6 +124,7 @@ spike/           Phase 0 validation code (kept: it documents the measurements)
 
 ## Documentation
 
+- **[How it works](docs/how-it-works.html)** — visual walkthrough for newcomers; open in a browser
 - [Analysis](docs/SIH26237-analysis.md) — problem, risks, approach comparison
 - [Implementation plan](docs/IMPLEMENTATION-PLAN.md) — phases, team split
 - [Phase 0 results](docs/PHASE0-RESULTS.md) — the measurements that set the design
