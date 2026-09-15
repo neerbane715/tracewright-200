@@ -8,3 +8,9 @@ node_modules/
 dist/
 .pytest_cache/
 *.db
+
+# Never commit private keys or generated demo state
+demo/
+pqfw-data/
+*.pqfw
+secret.json
