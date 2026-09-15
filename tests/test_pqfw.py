@@ -537,3 +537,91 @@ def test_a8_self_comparison_is_not_corroboration(tmp_path):
 
     ok, msg = gossip.quorum_view([r])
     assert ok and "cannot detect equivocation" in msg
+
+
+# ------------------------------------------- red-team regressions (found by
+#                                              redteam.py, not by unit tests)
+
+def _make_doc(path, font, size, justify, pages):
+    from reportlab.lib.enums import TA_JUSTIFY, TA_LEFT
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+    from reportlab.platypus import Paragraph, SimpleDocTemplate
+    txt = ("Operational readiness across the northern sector remains "
+           "contingent on sustained logistical throughput and the timely "
+           "rotation of forward units under the established directive. ")
+    doc = SimpleDocTemplate(str(path), pagesize=A4, leftMargin=50,
+                            rightMargin=50, topMargin=60, bottomMargin=60)
+    st = ParagraphStyle("b", parent=getSampleStyleSheet()["Normal"],
+                        fontName=font, fontSize=size, leading=size * 1.45,
+                        alignment=TA_JUSTIFY if justify else TA_LEFT)
+    doc.build([Paragraph(txt * 3, st) for _ in range(pages * 5)])
+
+
+@pytest.mark.parametrize("font,size,justify", [
+    ("Courier", 10.0, True),          # monospace: gap std 2.1pt vs 0.77
+    ("Times-Roman", 11.0, True),
+    ("Helvetica", 10.5, False),       # left-aligned, no justification stretch
+])
+def test_redteam_line_grouping_stable_across_fonts(tmp_path, font, size, justify):
+    """Line grouping must survive the embed rewrite.
+
+    Grouping by PyMuPDF's (block, line) indices broke here: a Courier page
+    reported 46 lines before marking and 34 after, so the decoder read bits at
+    positions the encoder never wrote. Baseline grouping is stable.
+    """
+    import random
+    import pymupdf
+    from pqfw.watermark import spacing
+
+    src = tmp_path / "src.pdf"
+    _make_doc(src, font, size, justify, 8)
+    out = tmp_path / "marked.pdf"
+
+    random.seed(11)
+    bits = [random.randint(0, 1) for _ in range(256)]
+    spacing.embed(str(src), str(out), bits)
+
+    before = len(spacing._lines_of(pymupdf.open(src)[0]))
+    after = len(spacing._lines_of(pymupdf.open(out)[0]))
+    assert before == after, f"grouping changed {before} -> {after}"
+
+    got = [b for b in spacing.extract(str(out)) if b is not None]
+    acc = sum(1 for a, b in zip(bits, got) if a == b) / max(len(got), 1)
+    assert acc == 1.0, f"recovery {acc:.1%}"
+
+
+def test_redteam_excerpt_still_attributable(env, tmp_path):
+    """Leaking a few pages must not defeat attribution.
+
+    Sequential extraction reads one bit stream in page order, so a missing page
+    shifts every later bit. identify_robust realigns per page.
+    """
+    import pymupdf
+    r = pipeline.decrypt(env["bundle"], "carol", env["ks"], env["led"],
+                         tmp_path / "carol.pdf")
+    d = pymupdf.open(r.output_path)
+    nd = pymupdf.open()
+    nd.insert_pdf(d, from_page=2, to_page=4)     # three pages only
+    excerpt = tmp_path / "excerpt.pdf"
+    nd.save(str(excerpt))
+    d.close()
+    nd.close()
+
+    v = investigate(excerpt, env["led"])
+    assert v.recipient_user_id == "carol", v.to_dict()
+
+
+def test_redteam_reordered_pages_still_attributable(env, tmp_path):
+    """Reversed page order must not defeat attribution."""
+    import pymupdf
+    r = pipeline.decrypt(env["bundle"], "alice", env["ks"], env["led"],
+                         tmp_path / "alice.pdf")
+    d = pymupdf.open(r.output_path)
+    d.select(list(range(d.page_count))[::-1])
+    shuffled = tmp_path / "shuffled.pdf"
+    d.save(str(shuffled))
+    d.close()
+
+    v = investigate(shuffled, env["led"])
+    assert v.recipient_user_id == "alice", v.to_dict()

@@ -106,3 +106,67 @@ def identify(pdf_path: str, seed: bytes, n_bits: int, n_users: int,
     return (accused, s, thr, tardos.margin(s),
             tardos.rank_suspects(bits, biases, book),
             sum(1 for b in bits if b is not None))
+
+
+def identify_robust(pdf_path: str, seed: bytes, n_bits: int, n_users: int,
+                    eps1: float = 1e-3):
+    """Attribution that survives excerpts and reordered pages.
+
+    `identify()` reads the document as one bit stream in page order, so it only
+    works on a complete, unmodified file. A leaker who shares three pages, or
+    whose PDF viewer reordered them, defeats it -- the marks are intact but
+    every bit lands at the wrong codeword index.
+
+    This variant extracts each page separately and realigns it. Each page's
+    slots occupy a contiguous run of the codeword; the run's starting offset is
+    unknown, so we try every plausible offset and keep the best-scoring one.
+    Pages are then merged into one sparse bit vector for the normal Tardos
+    accusation, with unmatched positions left as erasures.
+
+    Cost is O(pages x offsets) correlations, which is milliseconds at demo
+    scale. It is not free, so `identify()` remains the fast path for intact
+    documents.
+    """
+    from . import spacing
+
+    pages = spacing.extract_per_page(pdf_path)
+    if not pages:
+        return (None, np.zeros(n_users), 0.0, 0.0, [], 0)
+
+    biases, book = tardos.codebook(n_users, n_bits, seed)
+    merged: list[int | None] = [None] * n_bits
+
+    for slots in pages:
+        if not any(b is not None for b in slots):
+            continue
+        best_off, best_hits = None, -1
+        # A page's run starts at a multiple of the smallest page capacity in
+        # practice, but we do not know the original pagination, so scan every
+        # offset that could host this many slots.
+        for off in range(0, max(1, n_bits - len(slots) + 1)):
+            hits = 0
+            for j, b in enumerate(slots):
+                if b is None:
+                    continue
+                idx = off + j
+                if idx >= n_bits:
+                    break
+                # correlate against the whole codebook, not one user: the page
+                # belongs to SOME recipient and we are only fixing alignment
+                if any(book[u][idx] == b for u in range(n_users)):
+                    hits += 1
+            if hits > best_hits:
+                best_hits, best_off = hits, off
+        if best_off is None:
+            continue
+        for j, b in enumerate(slots):
+            if b is None:
+                continue
+            idx = best_off + j
+            if idx < n_bits and merged[idx] is None:
+                merged[idx] = b
+
+    accused, s, thr = tardos.accuse(merged, biases, book, eps1)
+    return (accused, s, thr, tardos.margin(s),
+            tardos.rank_suspects(merged, biases, book),
+            sum(1 for b in merged if b is not None))

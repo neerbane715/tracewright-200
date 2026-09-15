@@ -34,18 +34,39 @@ import pymupdf
 # differential cancels common-mode justification stretch.
 DELTA = 0.35
 MIN_WORDS_PER_LINE = 5      # need >=4 gaps to host 2 bits with margin
+# Baseline quantisation for line grouping. Must be smaller than the tightest
+# realistic line spacing (~10pt at 9pt type) and larger than intra-line bbox
+# jitter (~0.5pt). 3pt sits comfortably between.
+LINE_TOL = 3.0
 FONT = "helv"               # base-14; matches reportlab Helvetica
 
 
 def _lines_of(page) -> list[list[tuple]]:
-    """Group a page's words into lines, left-to-right."""
+    """Group a page's words into lines by BASELINE, left-to-right.
+
+    Grouping by PyMuPDF's (block, line) indices looks natural but is wrong here:
+    those indices are assigned by the text extractor, and rewriting a page can
+    change how it groups the same words. Measured on a Courier document, one
+    page reported 46 lines before marking and 34 after -- identical words,
+    different grouping -- so the decoder read bits at positions the encoder
+    never wrote, and attribution failed.
+
+    The baseline y-coordinate is a geometric property of the page, not an
+    artefact of extraction, so it survives the rewrite. Words are bucketed to a
+    tolerance because glyphs on one line differ slightly in reported bbox.
+    """
     words = page.get_text("words")
-    buckets: dict[tuple, list] = defaultdict(list)
+    if not words:
+        return []
+
+    buckets: dict[int, list] = defaultdict(list)
     for w in words:
-        buckets[(w[5], w[6])].append(w)
+        # quantise the bbox bottom; LINE_TOL is well below any line spacing
+        buckets[round(w[3] / LINE_TOL)].append(w)
+
     out = []
-    for key in sorted(buckets):
-        ws = sorted(buckets[key], key=lambda w: w[0])
+    for key in sorted(buckets):                 # top-to-bottom
+        ws = sorted(buckets[key], key=lambda w: w[0])   # left-to-right
         if len(ws) >= MIN_WORDS_PER_LINE:
             out.append(ws)
     return out
@@ -172,7 +193,7 @@ def extract(path: str, nbits: int | None = None,
     bits: list[int | None] = []
     confs: list[float] = []
     for page in doc:
-        for ws in _lines_of(page):
+        for ws in _lines_of(page):  # noqa: B007 - see extract_per_page
             gaps = [ws[i + 1][0] - ws[i][2] for i in range(len(ws) - 1)]
             for p in range(len(gaps) // 2):
                 if nbits is not None and len(bits) >= nbits:
@@ -186,3 +207,35 @@ def extract(path: str, nbits: int | None = None,
                 confs.append(abs(diff))
     doc.close()
     return (bits, confs) if with_confidence else bits
+
+
+def extract_per_page(path: str) -> list[list[int | None]]:
+    """Extract bits page by page, keeping each page's slots separate.
+
+    `extract()` reads the whole document as one bit stream in page order. That
+    is correct only when the investigator holds the complete, unmodified file.
+    Real leaks are often excerpts or reordered copies, and a missing or moved
+    page shifts every subsequent bit, destroying alignment.
+
+    Measured on the red-team harness: leaking one page, or reversing page
+    order, defeated attribution entirely even though the marks were intact.
+
+    Returning per-page slot lists lets the caller realign (see
+    engine.identify_robust), because each page's bits still sit at a fixed
+    offset within the original codeword -- the offset is simply unknown.
+    """
+    doc = pymupdf.open(path)
+    pages: list[list[int | None]] = []
+    try:
+        for page in doc:
+            slots: list[int | None] = []
+            for ws in _lines_of(page):
+                gaps = [ws[i + 1][0] - ws[i][2] for i in range(len(ws) - 1)]
+                for p in range(len(gaps) // 2):
+                    diff = gaps[2 * p] - gaps[2 * p + 1]
+                    slots.append(None if abs(diff) < CONFIDENCE_FLOOR
+                                 else (1 if diff > 0 else 0))
+            pages.append(slots)
+    finally:
+        doc.close()
+    return pages

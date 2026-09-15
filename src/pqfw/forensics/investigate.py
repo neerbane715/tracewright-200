@@ -128,6 +128,24 @@ def investigate(leaked_pdf: str | Path, ledger: LedgerNode,
         except Exception as e:
             v.notes.append(f"record #{idx}: extraction failed ({type(e).__name__})")
             continue
+        # Fast path failed to separate a suspect. The marks may still be
+        # intact but misaligned -- an excerpt or a reordered copy shifts every
+        # bit. Retry with per-page realignment before giving up. (Both cases
+        # were found by the red-team harness, not by the unit tests.)
+        if accused is None or marg < MARGIN_FLOOR:
+            try:
+                r2 = engine.identify_robust(
+                    str(leaked_pdf), rec.watermark_seed, rec.n_bits,
+                    max(rec.n_users, 2))
+                if r2[0] is not None and r2[3] > marg:
+                    accused, scores_, thr, marg, ranking, recovered = r2
+                    v.notes.append(
+                        "document was an excerpt or had reordered pages; "
+                        "attribution used per-page realignment")
+            except Exception as e:
+                v.notes.append(
+                    f"realignment pass failed ({type(e).__name__})")
+
         if recovered == 0:
             continue
         top_score = float(np.max(scores_))
