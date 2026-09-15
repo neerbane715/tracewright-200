@@ -30,7 +30,16 @@ def main() -> None:
         sys.exit(f"missing {DOC}\nrun: python spike/make_testdoc.py {DOC}")
 
     if DEMO.exists():
-        shutil.rmtree(DEMO)
+        try:
+            shutil.rmtree(DEMO)
+        except PermissionError as e:
+            # Windows holds a lock on an open SQLite file. If the API server is
+            # running, the old ledger survives and the "reset" silently does
+            # nothing -- which during a demo means a stale, possibly tampered
+            # ledger. Fail loudly instead.
+            sys.exit(
+                f"cannot remove {DEMO}: {e.filename or e} is locked.\n"
+                f"Stop the API server (uvicorn) and run this again.")
     DEMO.mkdir(parents=True)
     home = DEMO / "pqfw-data"
 

@@ -350,3 +350,53 @@ def test_erasures_do_not_create_false_evidence():
     biases, book = tardos.codebook(n, m, seed)
     acc, s, _ = tardos.accuse([None] * m, biases, book)
     assert acc is None and float(np.max(np.abs(s))) == 0.0
+
+
+# ---------------------------------------------------------------- A4/A5 bind
+
+def test_a4_record_binds_who_what_which_when(env, tmp_path):
+    """A4: the record ties identity, document, watermark and time together."""
+    r = pipeline.decrypt(env["bundle"], "carol", env["ks"], env["led"],
+                         tmp_path / "c.pdf")
+    rec = r.record
+    ident = env["ks"].public("carol")
+
+    assert rec.recipient_fingerprint == ident.fingerprint     # WHO
+    assert rec.doc_hash == sha256(DOC.read_bytes())           # WHAT
+    assert len(rec.watermark_commitment) == 32                # WHICH
+    assert rec.session_id and rec.timestamp.endswith("+00:00")  # WHEN
+
+    # The commitment must actually commit: changing any bit of the codeword
+    # must change it, or it binds nothing.
+    from pqfw.watermark.engine import WatermarkPlan
+    biases = tardos.generate_biases(rec.n_bits, rec.watermark_seed)
+    cw = [int(b) for b in tardos.codeword(biases, rec.user_index,
+                                          rec.watermark_seed)]
+    good = WatermarkPlan(rec.watermark_seed, rec.n_bits, rec.user_index,
+                         rec.n_users, cw)
+    assert good.commitment == rec.watermark_commitment
+    flipped = list(cw)
+    flipped[0] ^= 1
+    bad = WatermarkPlan(rec.watermark_seed, rec.n_bits, rec.user_index,
+                        rec.n_users, flipped)
+    assert bad.commitment != rec.watermark_commitment
+
+
+def test_a5_recipient_key_signs_record(env, tmp_path):
+    """A5: the signature verifies under the RECIPIENT's key and no other."""
+    r = pipeline.decrypt(env["bundle"], "carol", env["ks"], env["led"],
+                         tmp_path / "c.pdf")
+    carol = env["ks"].public("carol")
+    alice = env["ks"].public("alice")
+
+    assert r.signed.sig_public == carol.sig_public
+    assert verify(carol.sig_public, r.record.canonical_bytes(),
+                  r.signed.signature)
+    # not carol's key -> must not verify
+    assert not verify(alice.sig_public, r.record.canonical_bytes(),
+                      r.signed.signature)
+    # altered record -> must not verify
+    tampered = DecryptionRecord.from_dict(
+        {**r.record.to_dict(), "recipient_user_id": "alice"})
+    assert not verify(carol.sig_public, tampered.canonical_bytes(),
+                      r.signed.signature)
