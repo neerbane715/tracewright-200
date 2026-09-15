@@ -124,7 +124,7 @@ def investigate(leaked_pdf: str | Path, ledger: LedgerNode,
         try:
             accused, scores_, thr, marg, ranking, recovered = engine.identify(
                 str(leaked_pdf), rec.watermark_seed, rec.n_bits,
-                max(len(candidates), 2))
+                max(rec.n_users, 2))
         except Exception as e:
             v.notes.append(f"record #{idx}: extraction failed ({type(e).__name__})")
             continue
@@ -156,17 +156,19 @@ def investigate(leaked_pdf: str | Path, ledger: LedgerNode,
         hash_leaf(sr.leaf_bytes()), idx, proof["tree_size"],
         proof["proof"], proof["root"])
 
-    # re-derive the codeword and check it against the ledger's commitment
+    # Re-derive the codeword from the record's own parameters and check it
+    # against the ledger's commitment. This proves the mark we matched is the
+    # same one the recipient signed for -- the link between document and record.
     biases = tardos.generate_biases(rec.n_bits, rec.watermark_seed)
-    cw = tardos.codeword(biases, _user_index_of(sr, candidates), rec.watermark_seed)
+    cw = tardos.codeword(biases, rec.user_index, rec.watermark_seed)
     plan = engine.WatermarkPlan(seed=rec.watermark_seed, n_bits=rec.n_bits,
-                                user_index=0, n_users=len(candidates),
+                                user_index=rec.user_index, n_users=rec.n_users,
                                 bits=[int(b) for b in cw])
     v.commitment_valid = (plan.commitment == rec.watermark_commitment)
 
-    v.ranking = [(candidates[i][1].record.recipient_user_id
-                  if i < len(candidates) else f"idx{i}", sc)
-                 for i, sc in ranking]
+    by_slot = {c[1].record.user_index: c[1].record.recipient_user_id
+               for c in candidates}
+    v.ranking = [(by_slot.get(i, f"slot{i}"), sc) for i, sc in ranking]
 
     # --- B10: produce the verdict
     if accused is None or marg < MARGIN_FLOOR:
@@ -190,9 +192,3 @@ def investigate(leaked_pdf: str | Path, ledger: LedgerNode,
             "not verify -- treat as unproven")
     return v
 
-
-def _user_index_of(sr: SignedRecord, candidates) -> int:
-    for i, (_, other) in enumerate(candidates):
-        if other.record.session_id == sr.record.session_id:
-            return i
-    return 0

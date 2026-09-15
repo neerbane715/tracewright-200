@@ -98,16 +98,25 @@ def scores(extracted: list[int | None], biases: np.ndarray,
     """
     m = min(len(extracted), len(biases), book.shape[1])
     p = biases[:m]
-    hi = np.sqrt((1.0 - p) / p)      # weight when user bit agrees with y
-    lo = -np.sqrt(p / (1.0 - p))     # weight when it disagrees
+    a = np.sqrt((1.0 - p) / p)
+    b = np.sqrt(p / (1.0 - p))
 
-    y = np.array([-1 if b is None else b for b in extracted[:m]], dtype=np.int8)
+    # Skoric symmetric weights. The four cases are NOT "agree/disagree" --
+    # that asymmetric form has non-zero expectation for innocent users and
+    # produces systematic false accusations (measured: innocent mean +249
+    # instead of 0). The correct table, whose expectation is exactly zero when
+    # y is independent of X:
+    #     y=1, X=1 -> +a      y=1, X=0 -> -b
+    #     y=0, X=1 -> -a      y=0, X=0 -> +b
+    y = np.array([-1 if v is None else v for v in extracted[:m]], dtype=np.int8)
     mask = y >= 0
-
     X = book[:, :m]
-    # agreement matrix: where user bit == extracted bit
-    agree = (X == y[None, :])
-    w = np.where(agree, hi[None, :], lo[None, :])
+
+    w = np.where(
+        y[None, :] == 1,
+        np.where(X == 1, a[None, :], -b[None, :]),
+        np.where(X == 1, -a[None, :], b[None, :]),
+    )
     w = np.where(mask[None, :], w, 0.0)   # erasures contribute nothing
     return w.sum(axis=1)
 

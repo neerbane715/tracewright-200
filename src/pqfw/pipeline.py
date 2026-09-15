@@ -167,7 +167,7 @@ def decrypt(bundle_path: str | Path, user_id: str, keystore: Keystore,
         session_id=session_id, doc_id=bundle.doc_id, doc_hash=bundle.doc_hash,
         recipient_fingerprint=ident.fingerprint, recipient_user_id=user_id,
         watermark_commitment=plan.commitment, watermark_seed=session_seed,
-        n_bits=plan.n_bits)
+        n_bits=plan.n_bits, user_index=user_index, n_users=len(bundle.slots))
 
     # --- step 6: the RECIPIENT signs it with their own ML-DSA key (PS B4/A5)
     signature = sign(sig_sec, record.canonical_bytes())

@@ -108,12 +108,13 @@ def embed(in_path: str, out_path: str, bits: list[int]) -> int:
                 size = round(ws[0][3] - ws[0][1], 1)
             x = ws[0][0]
             fs = _fontsize_for(page, ws)
-            tw.append((x, y_base - _descent(fs)), ws[0][4],
-                      fontsize=fs, font=pymupdf.Font(FONT))
+            base = _baseline(y_base, fs)
+            tw.append((x, base), ws[0][4],
+                      fontsize=fs, font=_FONT_CACHE)
             for i in range(1, len(ws)):
                 x = x + _wordwidth(ws[i - 1][4], fs) + gaps[i - 1] + deltas[i - 1]
-                tw.append((x, y_base - _descent(fs)), ws[i][4],
-                          fontsize=fs, font=pymupdf.Font(FONT))
+                tw.append((x, base), ws[i][4],
+                          fontsize=fs, font=_FONT_CACHE)
             # erase the original line
             r = pymupdf.Rect(min(w[0] for w in ws) - 1, min(w[1] for w in ws) - 0.5,
                              max(w[2] for w in ws) + 40, max(w[3] for w in ws) + 0.5)
@@ -133,8 +134,15 @@ def _wordwidth(text: str, fs: float) -> float:
     return _FONT_CACHE.text_length(text, fontsize=fs)
 
 
-def _descent(fs: float) -> float:
-    return _FONT_CACHE.descender * fs * -1 * 0  # baseline already in y1
+def _baseline(bbox_bottom: float, fs: float) -> float:
+    """Convert a word's bounding-box bottom to its typographic baseline.
+
+    get_text("words") reports the glyph bbox, whose bottom sits DESCENDER below
+    the baseline. TextWriter.append() positions by baseline. Ignoring the
+    difference shifts every rewritten line downward -- measured at 3.2pt, which
+    is plainly visible and would break the "visually identical" requirement.
+    """
+    return bbox_bottom + _FONT_CACHE.descender * fs
 
 
 def _fontsize_for(page, ws) -> float:

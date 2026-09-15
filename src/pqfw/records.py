@@ -184,6 +184,8 @@ class DecryptionRecord:
     watermark_commitment: bytes   # SHA-256(codeword_bits || session_id)
     watermark_seed: bytes         # seed the codeword was derived from
     n_bits: int
+    user_index: int               # slot position; needed to re-derive the codeword
+    n_users: int                  # codebook size at embed time
     timestamp: str = field(default_factory=utc_now)
     version: int = 1
 
@@ -198,6 +200,8 @@ class DecryptionRecord:
             "watermark_commitment": b64e(self.watermark_commitment),
             "watermark_seed": b64e(self.watermark_seed),
             "n_bits": self.n_bits,
+            "user_index": self.user_index,
+            "n_users": self.n_users,
             "timestamp": self.timestamp,
         }
 
@@ -210,7 +214,8 @@ class DecryptionRecord:
             recipient_user_id=d["recipient_user_id"],
             watermark_commitment=b64d(d["watermark_commitment"]),
             watermark_seed=b64d(d["watermark_seed"]),
-            n_bits=d["n_bits"], timestamp=d["timestamp"],
+            n_bits=d["n_bits"], user_index=d["user_index"],
+            n_users=d["n_users"], timestamp=d["timestamp"],
             version=d.get("version", 1),
         )
 
