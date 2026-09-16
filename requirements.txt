@@ -1,0 +1,60 @@
+# Tracewright — Python dependencies
+#
+#   pip install -r requirements.txt
+#   pip install -e .          # puts the local pqfw package on the path
+#
+# Both lines are needed. This file pins the third-party libraries; the second
+# command installs the project itself (src/pqfw, src/pqfw_api) in editable mode.
+#
+# Versions are lower bounds, matching pyproject.toml. The exact versions this
+# was built and verified against are recorded at the bottom of this file.
+#
+# Everything here is pure Python or ships prebuilt wheels — no C toolchain, no
+# native cryptographic library to compile. That is deliberate: the system has
+# to install on an air-gapped machine.
+
+# --- post-quantum cryptography -------------------------------------------
+# NIST FIPS 203 (ML-KEM) and FIPS 204 (ML-DSA), pure Python.
+# liboqs was evaluated and rejected: it ships no native library for Windows
+# and building it needs cmake + MSVC, which an air-gapped target may not have.
+kyber-py>=1.0
+dilithium-py>=1.0
+
+# AES-256-GCM for the document body and for wrapping content keys.
+cryptography>=42.0
+
+# --- watermarking ---------------------------------------------------------
+# PDF text geometry: reading word positions and re-laying them with modified
+# inter-word spacing. The whole watermark carrier depends on this.
+pymupdf>=1.24
+
+# Tardos codeword generation and correlation scoring.
+numpy>=1.26
+
+# --- command line ---------------------------------------------------------
+typer>=0.12
+rich>=13.0
+
+# --- web API (optional: only needed for the browser UI) -------------------
+fastapi>=0.110
+uvicorn>=0.29
+python-multipart>=0.0.9      # required for file upload in Act 5
+
+# --- development and testing (optional) -----------------------------------
+pytest>=8.0
+reportlab>=4.0               # generates the demo document
+playwright>=1.40             # browser verification suites; also needs:
+                             #   python -m playwright install chromium
+
+# -------------------------------------------------------------------------
+# Verified working with these exact versions (2026-09-17):
+#
+#   cryptography==50.0.1      pymupdf==1.28.2
+#   dilithium-py==1.4.0       pytest==9.1.1
+#   fastapi==0.141.1          python-multipart==0.0.32
+#   kyber-py==1.2.0           reportlab==5.0.1
+#   numpy==2.5.3              rich==15.0.0
+#   playwright==1.63.0        typer==0.27.2
+#                             uvicorn==0.52.4
+#
+# If something breaks after an upgrade, pin to these.

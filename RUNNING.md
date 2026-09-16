@@ -31,15 +31,52 @@ Then open **http://127.0.0.1:5174** and click *Start the walkthrough*.
 ## First time on a new machine
 
 ```bash
-pip install -e ".[api,dev]"
+pip install -r requirements.txt     # third-party libraries
+pip install -e .                    # puts the local pqfw package on the path
+
 python spike/make_demo_doc.py demo-docs/tender-evaluation.pdf
+
 cd ui && npm install && cd ..
 ```
 
-Then follow the quick start. The demo document is generated rather than
-committed, so a fresh clone needs that middle line once.
+Then follow the quick start.
 
-Requirements: Python 3.11+, Node 18+. No internet needed after `npm install`.
+**Both pip lines are needed.** The first installs the libraries; the second
+registers `pqfw` and `pqfw_api` from `src/` so `import pqfw` and
+`python -m pqfw.cli` work. Installing only the requirements leaves you with
+`ModuleNotFoundError: No module named 'pqfw'`.
+
+The demo document is generated rather than committed, so a fresh clone needs
+that middle line once.
+
+Requirements: **Python 3.11+**, **Node 18+**. Nothing needs a C compiler — the
+post-quantum cryptography is pure Python, deliberately, so this installs on a
+machine with no build toolchain.
+
+For the browser verification suites only:
+
+```bash
+python -m playwright install chromium
+```
+
+### Installing without internet
+
+`requirements.txt` pins nothing exotic and every package ships a wheel. On a
+machine with connectivity:
+
+```bash
+pip download -r requirements.txt -d wheels/
+```
+
+Copy `wheels/` across, then on the air-gapped machine:
+
+```bash
+pip install --no-index --find-links wheels/ -r requirements.txt
+pip install -e .
+```
+
+`npm` is only needed to build the UI; the CLI has no JavaScript dependency at
+all.
 
 ---
 
@@ -126,8 +163,12 @@ python -m pqfw.cli investigate frank.pdf
 | `python ui/verify_ui.py` | Acts 0–1 in a browser | ~30 s |
 | `python ui/verify_act2.py` … `act5.py` | one act each | 1–4 min |
 
-The browser suites need `pip install playwright && python -m playwright install
-chromium` once.
+The browser suites need Chromium downloaded once (playwright itself comes from
+`requirements.txt`):
+
+```bash
+python -m playwright install chromium
+```
 
 `verify_offline.py` is the one to run before claiming the air-gap requirement:
 it blocks every non-localhost request at the browser level and drives all six
@@ -164,6 +205,15 @@ press *Rebuild a clean ledger* in Act 3, or stop the servers and re-run
 **A judge's own PDF says NO_WATERMARK.** That is correct — their file was never
 distributed through the system. The screen explains why. It is a feature worth
 pointing at, not a failure.
+
+**`ModuleNotFoundError: No module named 'pqfw'`.** The requirements installed
+but the project itself did not. Run `pip install -e .` from the repository
+root.
+
+**`ModuleNotFoundError` for something else** (fastapi, pymupdf, reportlab…).
+Run `pip install -r requirements.txt`. If it names `reportlab`, that is only
+needed to regenerate the demo document; if it names `playwright`, only the
+browser test suites use it.
 
 ---
 
