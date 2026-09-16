@@ -241,6 +241,8 @@ def api_tamper(body: TamperBody):
         raise HTTPException(404, "no such record")
     e = json.loads(row[0])
     before = e["record"]["recipient_user_id"]
+    # Keep the original so /api/ledger/restore can undo this during a demo.
+    attribute._TAMPER_BACKUP.setdefault(body.index, row[0])
     e["record"]["recipient_user_id"] = body.new_user_id
     db.execute("UPDATE leaves SET entry=? WHERE idx=?",
                (json.dumps(e, sort_keys=True, separators=(",", ":")),

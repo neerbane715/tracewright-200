@@ -36,6 +36,10 @@ ROOT = Path(__file__).parent.parent.parent
 DEMO = ROOT / "demo"
 HOME = DEMO / "pqfw-data"
 
+# Original rows saved before a demo tamper, so the presenter can undo it.
+# Keyed by ledger index; holds the exact JSON that was there before.
+_TAMPER_BACKUP: dict[int, str] = {}
+
 
 def _led() -> LedgerNode:
     return LedgerNode(HOME / "ledger.db")
@@ -327,3 +331,94 @@ def compare(body: CompareBody):
         "ink_delta": ink_delta,
         "page": page,
     }
+
+
+# --------------------------------------------------------------------- B5
+
+@router.get("/ledger/chain")
+def ledger_chain():
+    """The ledger as a verifiable chain, with per-record integrity.
+
+    /api/ledger returns a flat list. Act 3 draws the linkage, so it needs each
+    record's own leaf hash and whether that leaf still matches its stored
+    content -- which is what makes tampering *locatable* rather than merely
+    detectable.
+    """
+    L = _led()
+    tampered, bad_idx, msg = L.detect_tamper()
+    sth = L.latest_sth()
+
+    rows = []
+    for idx, sr in L.all_records():
+        rec = sr.record
+        leaf = hash_leaf(sr.leaf_bytes()).hex()
+        # A record is intact when its stored bytes still hash to the leaf that
+        # was committed, AND its own signature still verifies.
+        sig_ok = verify(sr.sig_public, rec.canonical_bytes(), sr.signature)
+        rows.append({
+            "index": idx,
+            "user_id": rec.recipient_user_id,
+            "fingerprint": rec.recipient_fingerprint,
+            "doc_id": rec.doc_id,
+            "session_id": rec.session_id,
+            "timestamp": rec.timestamp,
+            "n_bits": rec.n_bits,
+            "leaf_hash": leaf,
+            "signature_valid": sig_ok,
+            "signature_len": len(sr.signature),
+            "broken": (bad_idx is not None and idx == bad_idx) or not sig_ok,
+        })
+
+    return {
+        "size": L.size(),
+        "root": L.root().hex(),
+        "sth": {
+            "tree_size": sth["tree_size"],
+            "root": sth["root"].hex(),
+            "signed_at": sth["signed_at"],
+            "signature_bytes": len(sth["signature"]),
+            "valid": L.verify_sth(sth),
+            "algorithm": "ML-DSA-65",
+        } if sth else None,
+        "integrity": {
+            "intact": not tampered,
+            "first_broken_index": bad_idx,
+            "message": msg,
+        },
+        "records": rows,
+    }
+
+
+@router.post("/ledger/restore")
+def ledger_restore():
+    """Undo the demo tamper by restoring the damaged record from its backup.
+
+    The obvious implementation -- shell out to demo_reset.py -- cannot work:
+    this server holds an open SQLite handle, so Windows refuses to delete the
+    file and the restore fails every time. Instead the tamper endpoint keeps
+    the original row, and this puts it back through the same connection.
+
+    Only possible because tampering here is a demo affordance. A real
+    deployment has no such button; that is the whole point of the ledger.
+    """
+    import sqlite3
+
+    if not _TAMPER_BACKUP:
+        tampered, _, msg = _led().detect_tamper()
+        if tampered:
+            raise HTTPException(
+                409, "this ledger was altered outside the demo and cannot be "
+                     "repaired from here")
+        return {"restored": True, "message": msg}
+
+    db = sqlite3.connect(str(HOME / "ledger.db"))
+    try:
+        for idx, entry in _TAMPER_BACKUP.items():
+            db.execute("UPDATE leaves SET entry=? WHERE idx=?", (entry, idx))
+        db.commit()
+    finally:
+        db.close()
+    _TAMPER_BACKUP.clear()
+
+    tampered, _, msg = _led().detect_tamper()
+    return {"restored": not tampered, "message": msg}
