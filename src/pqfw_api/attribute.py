@@ -222,3 +222,108 @@ def verify_signature(body: VerifyBody):
         "all_passed": sig_ok and incl_ok and control_fails and not tampered,
         "tamper_index": bad_idx,
     }
+
+
+# --------------------------------------------------------------------- B4
+
+@router.get("/page-image")
+def page_image(path: str, page: int = 0, dpi: int = 110):
+    """Render one page of a decrypted copy so the UI can show it.
+
+    Act 2 has to *show* that two copies look identical rather than assert it.
+    Rendering server-side keeps the claim honest: the image a viewer compares
+    is produced from the actual file on disk.
+    """
+    import io as _io
+
+    import pymupdf
+    from fastapi.responses import Response
+
+    target = _safe(path)
+    if not target.exists():
+        raise HTTPException(404, "that copy is no longer present")
+    try:
+        doc = pymupdf.open(target)
+        if page < 0 or page >= doc.page_count:
+            raise HTTPException(400, "no such page")
+        pix = doc[page].get_pixmap(dpi=max(40, min(dpi, 200)))
+        buf = _io.BytesIO(pix.tobytes("png"))
+        doc.close()
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, f"could not render that page: {type(e).__name__}")
+    return Response(buf.getvalue(), media_type="image/png",
+                    headers={"Cache-Control": "no-store"})
+
+
+class CompareBody(BaseModel):
+    a: str
+    b: str
+    page: int = 0
+
+
+@router.post("/compare")
+def compare(body: CompareBody):
+    """Prove two copies are visually identical but forensically distinct.
+
+    Every number here is measured from the two files, not asserted:
+      * byte equality and SHA-256 of each
+      * how many byte positions differ
+      * whether the rendered pixels differ, and by how much
+      * whether the text and every baseline are unchanged
+
+    The last one matters most: identical words at identical baselines with a
+    different byte stream is exactly the claim the product makes.
+    """
+    import hashlib
+
+    import numpy as np
+    import pymupdf
+
+    pa, pb = _safe(body.a), _safe(body.b)
+    for p in (pa, pb):
+        if not p.exists():
+            raise HTTPException(404, "one of those copies is no longer present")
+
+    A, B = pa.read_bytes(), pb.read_bytes()
+    n = min(len(A), len(B))
+    differing = sum(1 for i in range(n) if A[i] != B[i]) + abs(len(A) - len(B))
+
+    da, db = pymupdf.open(pa), pymupdf.open(pb)
+    page = max(0, min(body.page, min(da.page_count, db.page_count) - 1))
+
+    wa = da[page].get_text("words")
+    wb = db[page].get_text("words")
+    same_text = [w[4] for w in wa] == [w[4] for w in wb]
+
+    ya = sorted({round(w[3], 2) for w in wa})
+    yb = sorted({round(w[3], 2) for w in wb})
+    baseline_shift = (max((abs(x - y) for x, y in zip(ya, yb)), default=0.0)
+                      if len(ya) == len(yb) else None)
+
+    xa = da[page].get_pixmap(dpi=100)
+    xb = db[page].get_pixmap(dpi=100)
+    M = np.frombuffer(xa.samples, np.uint8).astype(int)
+    N = np.frombuffer(xb.samples, np.uint8).astype(int)
+    same_shape = M.shape == N.shape
+    pixel_diff = float(np.abs(M - N).mean()) if same_shape else None
+    ink_delta = float(abs(M.mean() - N.mean())) if same_shape else None
+
+    da.close()
+    db.close()
+
+    return {
+        "a": {"name": pa.name, "bytes": len(A),
+              "sha256": hashlib.sha256(A).hexdigest()},
+        "b": {"name": pb.name, "bytes": len(B),
+              "sha256": hashlib.sha256(B).hexdigest()},
+        "byte_identical": A == B,
+        "differing_byte_positions": differing,
+        "same_words": same_text,
+        "word_count": len(wa),
+        "max_baseline_shift_pt": baseline_shift,
+        "pixel_mean_abs_diff": pixel_diff,
+        "ink_delta": ink_delta,
+        "page": page,
+    }
