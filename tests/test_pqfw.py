@@ -625,3 +625,20 @@ def test_redteam_reordered_pages_still_attributable(env, tmp_path):
 
     v = investigate(shuffled, env["led"])
     assert v.recipient_user_id == "alice", v.to_dict()
+
+
+def test_unmarked_document_is_not_reported_as_collusion(env, doc, tmp_path):
+    """An unmarked file must report NO_WATERMARK, never COLLUSION.
+
+    Found via the UI: a pristine, never-distributed PDF yielded 34 of 1534
+    slots above the confidence floor purely from natural spacing variation.
+    The verdict logic treated any non-zero count as "a watermark was
+    recovered" and reported the expected signature of a COLLUSION -- a false
+    and damaging claim about a document that had never been distributed.
+    """
+    pipeline.decrypt(env["bundle"], "alice", env["ks"], env["led"],
+                     tmp_path / "a.pdf")
+    v = investigate(doc, env["led"])
+    assert v.outcome is Outcome.NO_WATERMARK, v.to_dict()
+    assert v.recipient_user_id is None
+    assert not any("COLLUSION" in n for n in v.notes), v.notes
