@@ -19,15 +19,24 @@ from pqfw.ledger.node import LedgerNode
 
 ROOT = Path(__file__).parent
 DEMO = ROOT / "demo"
-DOC = ROOT / "spike" / "out" / "original.pdf"
+# The realistic demo document. spike/out/original.pdf is lorem-style filler
+# kept for robustness testing -- anything a judge sees should be the tender
+# evaluation report, or the story and the artefact do not match.
+DOC = ROOT / "demo-docs" / "tender-evaluation.pdf"
+FALLBACK_DOC = ROOT / "spike" / "out" / "original.pdf"
 
 RECIPIENTS = ["alice", "bob", "carol", "dave", "erin"]
 LEAKER = "carol"
 
 
 def main() -> None:
-    if not DOC.exists():
-        sys.exit(f"missing {DOC}\nrun: python spike/make_testdoc.py {DOC}")
+    doc = DOC
+    if not doc.exists():
+        doc = FALLBACK_DOC
+        if not doc.exists():
+            sys.exit("missing the demo document — run:\n"
+                     "  python spike/make_demo_doc.py demo-docs/tender-evaluation.pdf")
+        print(f"note: {DOC.name} not found, falling back to {doc.name}")
 
     if DEMO.exists():
         try:
@@ -52,8 +61,8 @@ def main() -> None:
     led = LedgerNode(home / "ledger.db")
 
     print("\nencrypting document for all recipients...")
-    bundle = DEMO / "classified-report.pqfw"
-    b = pipeline.encrypt(DOC, idents, bundle)
+    bundle = DEMO / "tender-evaluation.pqfw"
+    b = pipeline.encrypt(doc, idents, bundle)
     print(f"  doc id {b.doc_id}, {len(b.slots)} recipient slots")
 
     print("\nperforming decryptions...")

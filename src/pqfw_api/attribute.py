@@ -422,3 +422,78 @@ def ledger_restore():
 
     tampered, _, msg = _led().detect_tamper()
     return {"restored": not tampered, "message": msg}
+
+
+# --------------------------------------------------------------------- B6
+
+class StageLeakBody(BaseModel):
+    source: str | None = None
+
+
+@router.post("/stage-leak")
+def stage_leak(body: StageLeakBody):
+    """Stage a leaked artefact WITHOUT working out who leaked it.
+
+    Deliberately ignorant. The previous wizard ran the real investigation at
+    this point, cached the answer, and had the next screen replay it while
+    labelling it "Extracted watermark". Act 5 must do the extraction, so this
+    endpoint refuses to look.
+
+    Returns only what a person who *found* the file would know: a filename, a
+    size, a hash, and how many pages it has.
+    """
+    import hashlib
+    import random
+
+    import pymupdf
+
+    if body.source:
+        src = _safe(body.source)
+    else:
+        # Pick one recipient's copy at random. Which one is not recorded
+        # anywhere in this response -- the demo operator does not know either.
+        copies = sorted(DEMO.glob("*-copy.pdf"))
+        if not copies:
+            raise HTTPException(
+                409, "no opened copies exist yet — open the document as a "
+                     "recipient first")
+        src = random.choice(copies)
+
+    if not src.exists():
+        raise HTTPException(404, "that file is no longer present")
+
+    leaked = DEMO / "surfaced-document.pdf"
+    shutil.copy(src, leaked)
+
+    raw = leaked.read_bytes()
+    try:
+        doc = pymupdf.open(leaked)
+        pages = doc.page_count
+        title = doc.metadata.get("title") or ""
+        doc.close()
+    except Exception:
+        pages, title = 0, ""
+
+    return {
+        "path": leaked.name,
+        "filename": leaked.name,
+        "bytes": len(raw),
+        "sha256": hashlib.sha256(raw).hexdigest(),
+        "pages": pages,
+        "title": title,
+        # Explicitly not included: who this came from. Act 5 has to find out.
+    }
+
+
+@router.get("/bundles")
+def bundles():
+    """Distributable bundles currently on disk, newest first.
+
+    Acts must not hardcode a filename. demo_reset.py produces
+    classified-report.pqfw while Act 1 produces one named after whichever
+    document was sealed, so a hardcoded name breaks whenever someone lands on
+    Act 2 without walking through Act 1 first.
+    """
+    found = sorted(DEMO.glob("*.pqfw"), key=lambda p: p.stat().st_mtime,
+                   reverse=True)
+    return [{"name": p.name, "bytes": p.stat().st_size} for p in found]

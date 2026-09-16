@@ -7,8 +7,6 @@ import { CryptoValue, IdentityCard } from "../components/Crypto";
 import { ApiTrace, Deep, Plain, useDepth } from "../components/Layers";
 import { ErrorPanel, Spinner, StagedProgress } from "../components/States";
 
-const BUNDLE = "tender-evaluation.pqfw";
-
 /** Act 2 — provenance being created.
  *
  * The two things this screen must achieve:
@@ -30,11 +28,19 @@ export default function Act2Open() {
   const [stage, setStage] = useState(0);
   const [err, setErr] = useState<unknown>(null);
   const [last, setLast] = useState<DecryptResult | null>(null);
+  const [bundle, setBundle] = useState<string | null>(null);
 
   const load = async () => {
     setLoadErr(null);
     try {
-      setIds(await api.get<Identity[]>("/api/identities"));
+      const [people, bundles] = await Promise.all([
+        api.get<Identity[]>("/api/identities"),
+        api.get<{ name: string }[]>("/api/bundles"),
+      ]);
+      setIds(people);
+      // Whatever was sealed most recently. Hardcoding a filename broke
+      // whenever someone reached this act without walking through Act 1.
+      setBundle(bundles[0]?.name ?? null);
     } catch (e) {
       setLoadErr(e);
     }
@@ -44,6 +50,10 @@ export default function Act2Open() {
   }, []);
 
   const open = async (userId: string) => {
+    if (!bundle) {
+      setErr(new Error("no sealed document is available yet"));
+      return;
+    }
     setWho(userId);
     setBusy(true);
     setErr(null);
@@ -57,7 +67,7 @@ export default function Act2Open() {
 
     try {
       const r = await api.post<DecryptResult>("/api/decrypt", {
-        bundle: BUNDLE,
+        bundle,
         identity: userId,
       });
       clearInterval(tick);
