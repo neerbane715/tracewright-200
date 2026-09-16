@@ -23,16 +23,18 @@ from pqfw.ledger.node import LedgerNode
 from pqfw.ledger import gossip as gsp
 from pqfw.watermark import engine, tardos
 
-from . import wizard
+from . import attribute, wizard
 
 DEMO = Path(__file__).parent.parent.parent / "demo"
 HOME = DEMO / "pqfw-data"
 
 app = FastAPI(title="PQ-FORENSIC", version="0.1.0")
 app.add_middleware(
-    CORSMiddleware, allow_origins=["http://localhost:5173"],
+    CORSMiddleware, allow_origins=["http://localhost:5173", "http://localhost:5174",
+                   "http://127.0.0.1:5173", "http://127.0.0.1:5174"],
     allow_methods=["*"], allow_headers=["*"])
 app.include_router(wizard.router)
+app.include_router(attribute.router)
 
 
 def _resolve(p: str | Path) -> Path:
