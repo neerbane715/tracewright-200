@@ -85,7 +85,22 @@ Show `ML-DSA-65 · 3309 B · a1b2c3d4…` with the full value on demand.
 **Finding 4 — block numbers are cosmetic.** `100 + ledger_index` is invented for
 looks. Real ledger indices are 0-based. Show the real index.
 
-**Finding 5 — leaked local paths reach the user.** `wizard.py:70` raises
+**Finding 5a — connection failures are indistinguishable from product failure.**
+
+Observed live (user screenshot): the wizard renders a bare red
+**"Failed to fetch"** under the stage rail when the API is unreachable.
+Reproduced by stopping uvicorn — the proxy returns 500 and the UI shows that
+string with no explanation, no retry, and no indication that a *server* is
+missing rather than the product being broken. The frontend fires stage1 on
+mount with `.catch(() => {})` (`Wizard.jsx:55`), so a race at startup silently
+produces a dead screen.
+
+For a live jury demo this is the worst possible failure mode: it looks like the
+product does not work. **Fix:** distinguish transport failure from application
+error, state plainly that the backend is not reachable, offer retry, and
+auto-retry briefly on mount so a startup race self-heals.
+
+**Finding 5b — leaked local paths reach the user.** `wizard.py:70` raises
 `f"could not clear {HOME}"`, surfacing `D:\Code\SIH26237\demo\wizard-data`. Root
 cause is a Windows file lock when the server holds the SQLite handle. Fix both:
 handle the lock properly, and never put a filesystem path in a user-facing
@@ -225,7 +240,8 @@ Minimal, and only where the current API blocks a required UX step.
 | B2 | `GET /api/event/{index}` — the full signed record for one decryption: canonical bytes, signature, public key, inclusion proof | Act 2's technical layer must show the real signature, and Act 5 must confirm *the same* signature. Cross-Act consistency is unverifiable without it. |
 | B3 | `POST /api/verify-signature` — verify a supplied record+signature+key, server-side, returning the boolean and what was checked | "Verify it yourself" must actually verify. Otherwise the depth layer is decoration. |
 | B4 | SSE or staged progress on decrypt | Act 2 shows six pipeline steps; today they arrive as one array after the fact. Needed to show provenance being created rather than reported. |
-| B5 | Fix `wizard.py` path leakage + lock handling | Finding 5. User-facing strings must never contain filesystem paths. |
+| B5 | Fix `wizard.py` path leakage + lock handling | Finding 5b. User-facing strings must never contain filesystem paths. |
+| B7 | Frontend: typed transport-vs-application error handling, retry, startup grace | Finding 5a. A missing backend must never read as a broken product during a jury demo. |
 | B6 | Vendor fonts; drop the Google Fonts link | Finding: air-gap violation. Hard requirement. |
 
 Everything else the new UI needs already exists. `wizard.py` is superseded by
@@ -286,6 +302,18 @@ Reported honestly, including anything that cannot be proven.
 - Offline: full journey with the network disabled
 
 ---
+
+## Decisions taken (answers received)
+
+| Question | Decision |
+|---|---|
+| Product name | **Tracewright** as placeholder; swappable via one constant. Final name deferred. |
+| Demo document | Synthetic 10-page tender evaluation report. Built, capacity-verified (1917 bits vs 1534 needed). |
+| Judge uploads own file in Act 5 | **Yes.** Needs an explicit, well-designed `NO_WATERMARK` state so a correct negative does not read as a failure. |
+| Known limits in Act 0 | **Present, not shouted.** Findable link, not a banner. |
+| Audience | **Both** presenter-led and self-guided. Build for unattended exploration that a presenter can also narrate. |
+| Scoring rubric | None published. Optimise for: a technical judge can verify every claim end to end. |
+| `wizard.py` | Retire on this branch. Teammate coordinated; `main` untouched. |
 
 ## Open question for the team
 
