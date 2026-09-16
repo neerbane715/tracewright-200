@@ -21,3 +21,6 @@ redteam-out/
 
 # generated demo document (rebuild: python spike/make_demo_doc.py)
 demo-docs/
+ui/.vite/
+ui/dist/
+ui/node_modules/
