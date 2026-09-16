@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import Wizard from "./Wizard.jsx";
 
 const api = {
   async get(p) { const r = await fetch(p); if (!r.ok) throw new Error((await r.json()).detail); return r.json(); },
@@ -14,6 +15,7 @@ const api = {
 };
 
 const VIEWS = [
+  ["wizard", "Wizard"],
   ["distribute", "Distribute"],
   ["receive", "Receive"],
   ["investigate", "Investigate"],
@@ -21,7 +23,7 @@ const VIEWS = [
 ];
 
 export default function App() {
-  const [view, setView] = useState("investigate");
+  const [view, setView] = useState("wizard");
   const [ledger, setLedger] = useState(null);
   const refresh = () => api.get("/api/ledger").then(setLedger).catch(() => {});
   useEffect(() => { refresh(); }, []);
@@ -44,6 +46,7 @@ export default function App() {
         </div>
       </aside>
       <main>
+        {view === "wizard" && <Wizard />}
         {view === "distribute" && <Distribute onDone={refresh} />}
         {view === "receive" && <Receive onDone={refresh} />}
         {view === "investigate" && <Investigate />}
