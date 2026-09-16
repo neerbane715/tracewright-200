@@ -1,0 +1,134 @@
+/* Design tokens — primitive → semantic → component.
+   Components must never reference a primitive directly. */
+
+:root {
+  /* ---------- PRIMITIVE ---------- */
+  --slate-950: #080b11;
+  --slate-900: #0d1117;
+  --slate-850: #11161d;
+  --slate-800: #161c25;
+  --slate-700: #232a35;
+  --slate-600: #2d3440;
+  --slate-400: #6b7686;
+  --slate-300: #8b94a3;
+  --slate-100: #d8dee7;
+  --slate-50:  #eef1f6;
+
+  --blue-500: #3b82f6;
+  --blue-600: #2563eb;
+  --blue-300: #7dabfa;
+
+  --green-500: #35b06a;
+  --red-500:   #e5484d;
+  --amber-500: #d4a017;
+
+  /* Per-recipient identity hues. Each ≥3:1 on the ground colour and
+     distinguishable under deuteranopia/protanopia — a viewer must be able to
+     track one recipient across all six acts by colour alone. */
+  --id-1: #4c9aff;   /* blue    */
+  --id-2: #c77dff;   /* violet  */
+  --id-3: #38c99a;   /* teal    */
+  --id-4: #f5a524;   /* amber   */
+  --id-5: #ff7a8a;   /* rose    */
+
+  --space-1: 4px;  --space-2: 8px;  --space-3: 12px; --space-4: 16px;
+  --space-5: 24px; --space-6: 32px; --space-7: 48px; --space-8: 64px;
+
+  --radius-sm: 4px; --radius-md: 7px; --radius-lg: 11px;
+
+  /* ---------- SEMANTIC ---------- */
+  --ground:     var(--slate-900);
+  --surface:    var(--slate-850);
+  --raised:     var(--slate-800);
+  --line:       var(--slate-700);
+  --line-soft:  var(--slate-800);
+  --ink:        var(--slate-50);
+  --ink-dim:    var(--slate-300);
+  --ink-faint:  var(--slate-400);
+
+  --accent:     var(--blue-500);
+  --accent-dim: var(--blue-600);
+
+  /* Outcome colours are RESERVED. Never decorative — if something is green
+     here it means a cryptographic check passed. */
+  --verified: var(--green-500);
+  --broken:   var(--red-500);
+  --caution:  var(--amber-500);
+
+  /* ---------- COMPONENT ---------- */
+  --rail-bg:          var(--slate-950);
+  --rail-active:      var(--surface);
+
+  --card-bg:          var(--surface);
+  --card-border:      var(--line);
+  --card-radius:      var(--radius-lg);
+
+  --crypto-bg:        var(--raised);
+  --crypto-border:    var(--line);
+  --crypto-ink:       var(--slate-100);
+
+  --btn-primary-bg:       var(--accent);
+  --btn-primary-bg-hover: var(--blue-600);
+  --btn-primary-ink:      #ffffff;
+  --btn-ghost-border:     var(--line);
+
+  --focus-ring: var(--blue-300);
+}
+
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    --ground:    #ffffff;
+    --surface:   #f7f9fc;
+    --raised:    #eef1f6;
+    --line:      #d5dbe4;
+    --line-soft: #e6eaf0;
+    --ink:       #10151d;
+    --ink-dim:   #4c5563;
+    --ink-faint: #6b7686;
+    --accent:     var(--blue-600);
+    --accent-dim: #1d4ed8;
+    --verified: #1a7f47;
+    --broken:   #c2282d;
+    --caution:  #97700c;
+    --rail-bg:  #f2f5f9;
+    --crypto-ink: #1d2531;
+    --btn-ghost-border: #c9d1dc;
+    --id-1: #1f6fd0; --id-2: #8b3fd4; --id-3: #12805f;
+    --id-4: #9a6400; --id-5: #c23a52;
+  }
+}
+
+* { box-sizing: border-box; }
+
+html, body, #root { height: 100%; }
+
+body {
+  margin: 0;
+  background: var(--ground);
+  color: var(--ink);
+  font-family: Inter, system-ui, sans-serif;
+  font-size: 14px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  font-feature-settings: "cv05" 1, "ss01" 1;
+}
+
+/* Fonts come from @fontsource-variable/* (imported in main.tsx) and are
+   bundled by Vite into the build output. Nothing is fetched from a CDN at
+   runtime -- the problem statement requires air-gapped operation, and the
+   previous build violated this by linking fonts.googleapis.com. */
+
+:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+  border-radius: 3px;
+}
+
+::selection { background: var(--accent); color: #fff; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}

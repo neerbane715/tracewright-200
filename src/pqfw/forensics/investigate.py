@@ -92,6 +92,13 @@ class Verdict:
 # inconclusive with a ranking rather than as a confident accusation.
 MARGIN_FLOOR = 0.8
 
+# Minimum fraction of codeword positions that must carry signal before we call
+# a document marked at all. Measured: a pristine, never-distributed PDF yields
+# ~2% of slots above the confidence floor purely from natural spacing
+# variation; a genuinely marked copy yields ~90-100%. 25% sits far from both,
+# so the classification is not sensitive to where exactly it is set.
+COVERAGE_FLOOR = 0.25
+
 
 def investigate(leaked_pdf: str | Path, ledger: LedgerNode,
                 doc_id: str | None = None) -> Verdict:
@@ -189,6 +196,27 @@ def investigate(leaked_pdf: str | Path, ledger: LedgerNode,
     v.ranking = [(by_slot.get(i, f"slot{i}"), sc) for i, sc in ranking]
 
     # --- B10: produce the verdict
+    #
+    # Distinguish "no mark at all" from "a mark we cannot resolve". An
+    # unmarked document still yields a handful of slots whose spacing happens
+    # to clear the confidence floor -- measured at 34 of 1534 (2%) on a
+    # pristine original. Treating that as a recovered watermark made the system
+    # report a COLLUSION for a file that had never been distributed, which is a
+    # false and damaging claim.
+    coverage = recovered / rec.n_bits if rec.n_bits else 0.0
+    if coverage < COVERAGE_FLOOR:
+        v.outcome = Outcome.NO_WATERMARK
+        v.notes.append(
+            f"no watermark is present: only {recovered} of {rec.n_bits} "
+            f"positions carried any signal ({coverage:.1%}), which is "
+            f"consistent with ordinary variation in unmarked text rather than "
+            f"an embedded mark.")
+        v.notes.append(
+            "this document was either never distributed through the system, "
+            "or was rasterised (screenshot, print, photograph), which destroys "
+            "the mark entirely.")
+        return v
+
     if accused is None or marg < MARGIN_FLOOR:
         v.outcome = Outcome.INCONCLUSIVE
         v.notes.append(
