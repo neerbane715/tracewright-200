@@ -3,7 +3,11 @@ import { useEffect, useState } from "react";
 const api = {
   async get(p) {
     const r = await fetch(p);
-    if (!r.ok) throw new Error((await r.json()).detail || r.statusText);
+    if (!r.ok) {
+      let msg = r.statusText;
+      try { const j = await r.json(); msg = j.detail || msg; } catch (_) {}
+      throw new Error(msg);
+    }
     return r.json();
   },
   async post(p, b) {
@@ -12,7 +16,11 @@ const api = {
       headers: b ? { "Content-Type": "application/json" } : undefined,
       body: b ? JSON.stringify(b) : undefined,
     });
-    if (!r.ok) throw new Error((await r.json()).detail || r.statusText);
+    if (!r.ok) {
+      let msg = r.statusText;
+      try { const j = await r.json(); msg = j.detail || msg; } catch (_) {}
+      throw new Error(msg);
+    }
     return r.json();
   },
 };

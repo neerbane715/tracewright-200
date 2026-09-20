@@ -24,34 +24,29 @@ from pqfw.ledger import gossip as gsp
 from pqfw.watermark import engine, tardos
 
 from . import attribute, wizard
+from .paths import DEMO, HOME, ROOT, ensure_seeded
 
-DEMO = Path(__file__).parent.parent.parent / "demo"
-HOME = DEMO / "pqfw-data"
+ensure_seeded()
 
 app = FastAPI(title="PQ-FORENSIC", version="0.1.0")
 app.add_middleware(
-    CORSMiddleware, allow_origins=["http://localhost:5173", "http://localhost:5174",
-                   "http://127.0.0.1:5173", "http://127.0.0.1:5174"],
-    allow_methods=["*"], allow_headers=["*"])
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 app.include_router(wizard.router)
 app.include_router(attribute.router)
 
 
 def _resolve(p: str | Path) -> Path:
-    """Resolve a client-supplied path against the demo directory.
-
-    The UI sends bare names like "classified-report.pqfw". Resolving those
-    against the server's CWD works only when uvicorn happens to be started
-    from demo/ -- it broke the Receive tab while the CLI kept working, because
-    the CLI runs inside that directory. Paths are resolved against DEMO, and
-    confined to it so a client cannot read arbitrary files.
-    """
+    """Resolve a client-supplied path against the demo directory."""
     p = Path(p)
     cand = p if p.is_absolute() else (DEMO / p)
     cand = cand.resolve()
     root = DEMO.resolve()
-    if not cand.is_relative_to(root) and not cand.is_relative_to(
-            Path(__file__).parent.parent.parent.resolve()):
+    if not (cand.is_relative_to(root) or cand.is_relative_to(ROOT.resolve())):
         raise HTTPException(400, f"path outside the demo directory: {p}")
     return cand
 
@@ -252,3 +247,14 @@ def api_tamper(body: TamperBody):
     tampered, idx, msg = led().detect_tamper()
     return {"edited_index": body.index, "from": before, "to": body.new_user_id,
             "detected": tampered, "detected_at": idx, "message": msg}
+
+
+# -------------------------------------------------------- static frontend mount
+# Enables single-container deployment (e.g. Render / Docker)
+from fastapi.staticfiles import StaticFiles
+
+_dist = ROOT / "dist"
+if _dist.exists():
+    if (_dist / "console").exists():
+        app.mount("/console", StaticFiles(directory=str(_dist / "console"), html=True), name="console")
+    app.mount("/", StaticFiles(directory=str(_dist), html=True), name="static")

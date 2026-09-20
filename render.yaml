@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: pq-forensic
+    env: docker
+    plan: free
+    dockerfilePath: Dockerfile
+    healthCheckPath: /api/identities
+    envVars:
+      - key: PORT
+        value: 8000

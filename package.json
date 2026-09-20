@@ -1,0 +1,9 @@
+{
+  "name": "sih26237-monorepo",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "postinstall": "npm --prefix ui install && npm --prefix web install",
+    "build": "node scripts/build.js"
+  }
+}

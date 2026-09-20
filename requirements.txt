@@ -43,8 +43,8 @@ python-multipart>=0.0.9      # required for file upload in Act 5
 # --- development and testing (optional) -----------------------------------
 pytest>=8.0
 reportlab>=4.0               # generates the demo document
-playwright>=1.40             # browser verification suites; also needs:
-                             #   python -m playwright install chromium
+eval_type_backport
+# playwright>=1.40             # browser verification suites (optional, not needed for production)
 
 # -------------------------------------------------------------------------
 # Verified working with these exact versions (2026-09-17):

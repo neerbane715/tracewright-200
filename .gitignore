@@ -3,7 +3,6 @@ __pycache__/
 .venv/
 venv/
 *.egg-info/
-spike/out/
 node_modules/
 dist/
 .pytest_cache/
@@ -14,13 +13,19 @@ demo/
 pqfw-data/
 *.pqfw
 secret.json
-spike/out/
 web/node_modules/
 web/dist/
 redteam-out/
 
-# generated demo document (rebuild: python spike/make_demo_doc.py)
-demo-docs/
+# demo documents
+demo-docs/*
+!demo-docs/tender-evaluation.pdf
+spike/out/*
+!spike/out/original.pdf
+
 ui/.vite/
 ui/dist/
 ui/node_modules/
+
+# Allow all pre-seeded demo assets
+!demo_seed/**

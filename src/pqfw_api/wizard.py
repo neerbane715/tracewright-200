@@ -27,16 +27,17 @@ from pqfw.ledger.merkle import hash_leaf
 from pqfw.ledger.node import LedgerNode
 from pqfw.watermark import engine, tardos
 
-ROOT = Path(__file__).parent.parent.parent
-DOC = ROOT / "spike" / "out" / "original.pdf"
-HOME = ROOT / "demo" / "wizard-data"
+from .paths import ROOT, SAMPLE_DOC as DOC, WIZARD_HOME as HOME
 
 RECIPIENTS = ["alice", "bob", "carol"]
 
 router = APIRouter(prefix="/api/wizard", tags=["wizard"])
 
+import gc
+
 # Single-process demo state -- there is exactly one wizard run at a time.
 _state: dict = {}
+_led_node: LedgerNode | None = None
 
 
 def _ks() -> Keystore:
@@ -44,7 +45,30 @@ def _ks() -> Keystore:
 
 
 def _led() -> LedgerNode:
-    return LedgerNode(HOME / "ledger.db")
+    global _led_node
+    if _led_node is None:
+        _led_node = LedgerNode(HOME / "ledger.db")
+    return _led_node
+
+
+def _close_led() -> None:
+    global _led_node
+    if _led_node is not None:
+        try:
+            _led_node.close()
+        except Exception:
+            pass
+        _led_node = None
+    gc.collect()
+
+
+def _handle_remove_readonly(func, path, exc_info):
+    import os, stat
+    try:
+        os.chmod(path, stat.S_IWRITE)
+        func(path)
+    except Exception:
+        pass
 
 
 @router.post("/stage1")
@@ -54,25 +78,45 @@ def stage1():
         raise HTTPException(
             500, f"missing sample document: {DOC} -- run "
             f"'python spike/make_testdoc.py {DOC}' first")
+
+    _close_led()
+
     if HOME.exists():
         try:
-            shutil.rmtree(HOME)
-        except FileNotFoundError:
-            # Windows occasionally reports a file mid-walk that a concurrent
-            # AV/indexer handle already removed. A clean second pass fixes it;
-            # if the directory is still there, something else is wrong.
-            shutil.rmtree(HOME, ignore_errors=True)
-        except PermissionError as e:
-            raise HTTPException(
-                423, f"wizard data locked: {e.filename or e} -- stop the "
-                f"API server and retry")
-        if HOME.exists():
-            raise HTTPException(500, f"could not clear {HOME}")
-    HOME.mkdir(parents=True)
+            shutil.rmtree(HOME, onerror=_handle_remove_readonly)
+        except Exception:
+            _close_led()
+            try:
+                shutil.rmtree(HOME, onerror=_handle_remove_readonly)
+            except Exception:
+                # Windows SQLite lock fallback: remove individual items and truncate DB
+                for item in list(HOME.iterdir()):
+                    if item.name == "ledger.db":
+                        try:
+                            item.unlink()
+                        except Exception:
+                            try:
+                                import sqlite3
+                                conn = sqlite3.connect(str(item))
+                                conn.executescript(
+                                    "DELETE FROM leaves; DELETE FROM sth; DELETE FROM nodekey; VACUUM;"
+                                )
+                                conn.commit()
+                                conn.close()
+                            except Exception:
+                                pass
+                    elif item.is_dir():
+                        shutil.rmtree(item, ignore_errors=True, onerror=_handle_remove_readonly)
+                    else:
+                        try:
+                            item.unlink()
+                        except Exception:
+                            pass
+    HOME.mkdir(parents=True, exist_ok=True)
     _state.clear()
 
     ks = _ks()
-    idents = [ks.create(u) for u in RECIPIENTS]
+    idents = [ks.create(u, overwrite=True) for u in RECIPIENTS]
 
     bundle_path = HOME / "classified-report.pqfw"
     b = pipeline.encrypt(DOC, idents, bundle_path)
@@ -142,7 +186,7 @@ def stage3():
 @router.post("/stage4")
 def stage4():
     """Simulate a leak: copy one recipient's real copy out and investigate it."""
-    if "decrypted" not in _state:
+    if "decrypted" not in _state or _led().size() == 0:
         raise HTTPException(409, "run stage2 first")
     leaker = random.choice(_state["decrypted"])
     leaked_path = HOME / "leaked.pdf"
