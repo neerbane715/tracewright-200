@@ -264,6 +264,51 @@ def page_image(path: str, page: int = 0, dpi: int = 110):
                     headers={"Cache-Control": "no-store"})
 
 
+@router.get("/download/{user_id}")
+@router.get("/download")
+@router.get("/documents/{user_id}/download")
+def download_user_document(user_id: str | None = None, file: str | None = None, inline: bool = False):
+    """Serve a recipient's watermarked decrypted document for download or viewing."""
+    from fastapi.responses import FileResponse
+
+    target = user_id or file
+    if not target:
+        raise HTTPException(400, "user_id or file parameter is required")
+
+    target = target.strip()
+    if target.endswith("-copy.pdf") or target.endswith(".pdf"):
+        fname = target
+    else:
+        fname = f"{target}-copy.pdf"
+
+    pdf_path = (DEMO / fname).resolve()
+    if not pdf_path.exists():
+        alt_path = (DEMO / f"{target}.pdf").resolve()
+        if alt_path.exists():
+            pdf_path = alt_path
+        else:
+            alt2 = (ROOT / "demo-docs" / fname).resolve()
+            if alt2.exists():
+                pdf_path = alt2
+            else:
+                raise HTTPException(404, f"document '{fname}' not found. Decrypt the document first.")
+
+    if not (pdf_path.is_relative_to(DEMO.resolve()) or pdf_path.is_relative_to(ROOT.resolve())):
+        raise HTTPException(403, "access denied")
+
+    disp = "inline" if inline else f'attachment; filename="{pdf_path.name}"'
+    return FileResponse(
+        path=str(pdf_path),
+        media_type="application/pdf",
+        filename=pdf_path.name,
+        headers={
+            "Content-Disposition": disp,
+            "Cache-Control": "no-cache",
+        },
+    )
+
+
+
 class CompareBody(BaseModel):
     a: str
     b: str

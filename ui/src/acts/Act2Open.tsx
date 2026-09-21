@@ -49,6 +49,42 @@ export default function Act2Open() {
     void load();
   }, []);
 
+  const selectOrOpen = (userId: string) => {
+    const existing = opened.find((o) => o.userId === userId);
+    if (existing && who !== userId && !busy) {
+      setWho(userId);
+      setLast({
+        output: existing.outputPath,
+        steps: existing.steps,
+        session_id: existing.sessionId,
+        ledger_index: existing.ledgerIndex,
+        bits: existing.bits,
+        record: existing.record,
+      });
+      setStage(existing.steps.length);
+      setErr(null);
+      return;
+    }
+    void open(userId);
+  };
+
+  // Restore latest opened recipient if none currently selected
+  useEffect(() => {
+    if (opened.length > 0 && !who) {
+      const latest = opened[opened.length - 1]!;
+      setWho(latest.userId);
+      setLast({
+        output: latest.outputPath,
+        steps: latest.steps,
+        session_id: latest.sessionId,
+        ledger_index: latest.ledgerIndex,
+        bits: latest.bits,
+        record: latest.record,
+      });
+      setStage(latest.steps.length);
+    }
+  }, [opened, who]);
+
   const open = async (userId: string) => {
     if (!bundle) {
       setErr(new Error("no sealed document is available yet"));
@@ -94,6 +130,7 @@ export default function Act2Open() {
   const hueOf = (u: string) =>
     HUES[(ids?.findIndex((i) => i.user_id === u) ?? 0) % HUES.length]!;
 
+
   return (
     <div className="space-y-8">
       <header>
@@ -132,7 +169,7 @@ export default function Act2Open() {
                     hue={HUES[i % HUES.length]!}
                     selected={who === id.user_id}
                     disabled={busy}
-                    onToggle={() => void open(id.user_id)}
+                    onToggle={() => selectOrOpen(id.user_id)}
                   />
                   {done && (
                     <span className="pointer-events-none absolute right-3 top-3 rounded-full bg-verified/15 px-1.5 py-0.5 font-mono text-[10px] text-verified">
@@ -207,6 +244,95 @@ export default function Act2Open() {
                   their own key, so they cannot later say they never opened it.
                 </span>
               </Plain>
+
+              {/* Download & View Document Feature */}
+              <div className="mt-5 rounded-lg border border-line-soft bg-surface-raised/50 p-4">
+                <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="flex items-start gap-3">
+                    <div
+                      className="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-lg"
+                      style={{
+                        backgroundColor: `${hueOf(who)}18`,
+                        color: hueOf(who),
+                        border: `1px solid ${hueOf(who)}35`,
+                      }}
+                    >
+                      <svg
+                        className="h-5 w-5"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      >
+                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                        <polyline points="14 2 14 8 20 8" />
+                        <path d="M12 18v-6" />
+                        <path d="m9 15 3 3 3-3" />
+                      </svg>
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <h3 className="text-sm font-semibold text-ink">
+                          <span className="capitalize">{who}</span>'s Watermarked Document
+                        </h3>
+                        <span className="rounded bg-line/60 px-1.5 py-0.5 font-mono text-[11px] text-ink-dim">
+                          {who}-copy.pdf
+                        </span>
+                      </div>
+                      <p className="mt-0.5 text-xs text-ink-dim">
+                        Embedded with {last.bits.toLocaleString()} bits · Session{" "}
+                        <code className="font-mono text-ink-dim/90">{last.session_id.slice(0, 8)}…</code> · Signed with ML-DSA-65
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-2.5 sm:shrink-0">
+                    <a
+                      href={`/api/download/${encodeURIComponent(who)}`}
+                      download={`${who}-copy.pdf`}
+                      className="inline-flex items-center gap-1.5 rounded-md bg-[var(--btn-primary-bg)] px-3.5 py-2 text-xs font-medium text-[var(--btn-primary-ink)] shadow-sm transition-colors hover:bg-[var(--btn-primary-bg-hover)]"
+                    >
+                      <svg
+                        className="h-4 w-4"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      >
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                        <polyline points="7 10 12 15 17 10" />
+                        <line x1="12" y1="15" x2="12" y2="3" />
+                      </svg>
+                      Download {who}'s document
+                    </a>
+
+                    <a
+                      href={`/api/download/${encodeURIComponent(who)}?inline=true`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1.5 rounded-md border border-[var(--btn-ghost-border)] bg-surface px-3 py-2 text-xs font-medium text-ink transition-colors hover:border-ink-faint hover:bg-surface-raised"
+                    >
+                      <svg
+                        className="h-4 w-4"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      >
+                        <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z" />
+                        <circle cx="12" cy="12" r="3" />
+                      </svg>
+                      View in browser
+                    </a>
+                  </div>
+                </div>
+              </div>
 
               <Deep title="The record they signed">
                 <SignedRecordDetail index={last.ledger_index} />
@@ -391,16 +517,46 @@ function ProofPanel({
       <div className="mt-5 grid gap-4 sm:grid-cols-2">
         {[a, b].map((c) => (
           <figure key={c.userId} className="m-0">
-            <figcaption className="mb-2 flex items-center gap-2">
-              <span
-                className="h-2.5 w-2.5 rounded-full"
-                style={{ background: hueOf(c.userId) }}
-                aria-hidden
-              />
-              <span className="text-sm font-medium capitalize">{c.userId}</span>
-              <span className="font-mono text-micro text-ink-faint">
-                record #{c.ledgerIndex}
-              </span>
+            <figcaption className="mb-2 flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <span
+                  className="h-2.5 w-2.5 rounded-full"
+                  style={{ background: hueOf(c.userId) }}
+                  aria-hidden
+                />
+                <span className="text-sm font-medium capitalize">{c.userId}</span>
+                <span className="font-mono text-micro text-ink-faint">
+                  record #{c.ledgerIndex}
+                </span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <a
+                  href={`/api/download/${encodeURIComponent(c.userId)}`}
+                  download={`${c.userId}-copy.pdf`}
+                  className="inline-flex items-center gap-1 rounded border border-[var(--btn-ghost-border)] px-2 py-0.5 text-[11px] text-ink-dim transition-colors hover:border-ink-faint hover:text-ink"
+                  title={`Download ${c.userId}'s PDF copy`}
+                >
+                  <svg className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                    <polyline points="7 10 12 15 17 10" />
+                    <line x1="12" y1="15" x2="12" y2="3" />
+                  </svg>
+                  Download
+                </a>
+                <a
+                  href={`/api/download/${encodeURIComponent(c.userId)}?inline=true`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1 rounded border border-[var(--btn-ghost-border)] px-1.5 py-0.5 text-[11px] text-ink-dim transition-colors hover:border-ink-faint hover:text-ink"
+                  title={`View ${c.userId}'s PDF in browser`}
+                >
+                  <svg className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z" />
+                    <circle cx="12" cy="12" r="3" />
+                  </svg>
+                  View
+                </a>
+              </div>
             </figcaption>
             <img
               src={`/api/page-image?path=${encodeURIComponent(c.outputPath)}&page=0&dpi=110`}
