@@ -151,36 +151,42 @@ async def api_investigate(file: UploadFile = File(...)):
 
 @app.get("/api/ledger")
 def api_ledger():
-    L = led()
-    sth = L.latest_sth()
-    return {
-        "size": L.size(),
-        "root": L.root().hex(),
-        "sth": {"tree_size": sth["tree_size"], "root": sth["root"].hex(),
-                "signed_at": sth["signed_at"],
-                "signature_bytes": len(sth["signature"]),
-                "valid": L.verify_sth(sth)} if sth else None,
-        "records": [
+    with led() as L:
+        sth = L.latest_sth()
+        size = L.size()
+        root_hex = L.root().hex()
+        sth_obj = {"tree_size": sth["tree_size"], "root": sth["root"].hex(),
+                   "signed_at": sth["signed_at"],
+                   "signature_bytes": len(sth["signature"]),
+                   "valid": L.verify_sth(sth)} if sth else None
+        records = [
             {"index": i, "user_id": r.record.recipient_user_id,
              "fingerprint": r.record.recipient_fingerprint,
              "doc_id": r.record.doc_id, "session_id": r.record.session_id,
              "timestamp": r.record.timestamp, "n_bits": r.record.n_bits}
-            for i, r in L.all_records()],
+            for i, r in L.all_records()
+        ]
+    return {
+        "size": size,
+        "root": root_hex,
+        "sth": sth_obj,
+        "records": records,
     }
 
 
 @app.get("/api/ledger/verify")
 def api_ledger_verify():
-    tampered, idx, msg = led().detect_tamper()
+    with led() as L:
+        tampered, idx, msg = L.detect_tamper()
     return {"tampered": tampered, "index": idx, "message": msg}
 
 
 @app.get("/api/ledger/proof/{index}")
 def api_proof(index: int):
-    L = led()
-    if index >= L.size():
-        raise HTTPException(404, "no such record")
-    p = L.prove_inclusion(index)
+    with led() as L:
+        if index >= L.size():
+            raise HTTPException(404, "no such record")
+        p = L.prove_inclusion(index)
     return {"index": index, "tree_size": p["tree_size"],
             "root": p["root"].hex(),
             "path": [h.hex() for h in p["proof"]]}
@@ -190,7 +196,8 @@ def api_proof(index: int):
 def api_sth():
     """This node's signed tree head, for a peer to compare against."""
     try:
-        return gsp.export_sth(led()).to_dict()
+        with led() as L:
+            return gsp.export_sth(L).to_dict()
     except ValueError as e:
         raise HTTPException(409, str(e))
 
@@ -206,9 +213,9 @@ def api_gossip(body: GossipBody):
         peers = [gsp.STH.from_dict(p) for p in body.peers]
     except Exception as e:
         raise HTTPException(400, f"malformed peer STH: {e}")
-    L = led()
-    results = gsp.audit(L, peers)
-    ok, msg = gsp.quorum_view(results)
+    with led() as L:
+        results = gsp.audit(L, peers)
+        ok, msg = gsp.quorum_view(results)
     return {"ok": ok, "summary": msg,
             "results": [r.to_dict() for r in results]}
 
@@ -244,7 +251,8 @@ def api_tamper(body: TamperBody):
                 body.index))
     db.commit()
     db.close()
-    tampered, idx, msg = led().detect_tamper()
+    with led() as L:
+        tampered, idx, msg = L.detect_tamper()
     return {"edited_index": body.index, "from": before, "to": body.new_user_id,
             "detected": tampered, "detected_at": idx, "message": msg}
 

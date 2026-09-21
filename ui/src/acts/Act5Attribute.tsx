@@ -6,6 +6,7 @@ import { HUES } from "../acts";
 import { CheckRow, CryptoValue } from "../components/Crypto";
 import { ApiTrace, Deep, Plain } from "../components/Layers";
 import { ErrorPanel, StagedProgress, useStageTicker } from "../components/States";
+import { useRun } from "../lib/run";
 
 /** Act 5 — the verdict.
  *
@@ -37,13 +38,30 @@ export default function Act5Attribute() {
   const nav = useNavigate();
   const loc = useLocation() as { state?: { path?: string } };
   const staged = loc.state?.path;
+  const { reset: resetRun } = useRun();
 
   const [verdict, setVerdict] = useState<FullVerdict | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<unknown>(null);
+  const [resetting, setResetting] = useState(false);
+  const [resetErr, setResetErr] = useState<unknown>(null);
   const [subject, setSubject] = useState<string | null>(staged ?? null);
   const started = useRef(false);
   const stage = useStageTicker(STAGES, busy, 2600);
+
+  const handleBackToBeginning = async () => {
+    setResetting(true);
+    setResetErr(null);
+    try {
+      await api.post("/api/reset", undefined, 180_000);
+      resetRun();
+      nav("/");
+    } catch (e) {
+      setResetErr(e);
+      setResetting(false);
+    }
+  };
+
 
   const runPath = async (path: string) => {
     setBusy(true);
@@ -126,19 +144,32 @@ export default function Act5Attribute() {
         />
       )}
 
+      {resetErr !== null && (
+        <ErrorPanel
+          error={resetErr}
+          onRetry={handleBackToBeginning}
+          context="resetting the demo & ledger"
+        />
+      )}
+
       {verdict && !busy && <VerdictPanel v={verdict} />}
 
       {verdict && !busy && (
         <section className="flex flex-wrap items-center gap-4 border-t border-line pt-6">
           <button
-            onClick={() => nav("/")}
-            className="rounded-md border border-[var(--btn-ghost-border)] px-3.5 py-2 text-sm transition-colors duration-fast hover:border-ink-faint"
+            onClick={handleBackToBeginning}
+            disabled={resetting}
+            className="inline-flex items-center gap-2 rounded-md border border-[var(--btn-ghost-border)] px-3.5 py-2 text-sm transition-colors duration-fast hover:border-ink-faint disabled:opacity-50"
           >
-            Back to the beginning
+            {resetting && (
+              <span className="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-accent border-t-transparent" />
+            )}
+            {resetting ? "Resetting demo & ledger…" : "Back to the beginning"}
           </button>
           <p className="text-sm text-ink-faint">
-            Try it with your own PDF above — one that was never distributed
-            should name nobody.
+            {resetting
+              ? "Running demo_reset.py to restore a clean, verified ledger…"
+              : "Try it with your own PDF above — one that was never distributed should name nobody."}
           </p>
         </section>
       )}

@@ -69,7 +69,26 @@ async def attribute(file: UploadFile = File(...)):
         shutil.copyfileobj(file.file, fh)
 
     try:
-        v = investigate(tmp, _led())
+        with _led() as led_node:
+            v = investigate(tmp, led_node)
+            out = v.to_dict()
+            out["source_filename"] = file.filename
+
+            # Attach the Merkle proof so the technical layer can show the real path
+            # rather than asserting one exists.
+            if v.ledger_index is not None:
+                try:
+                    p = led_node.prove_inclusion(v.ledger_index)
+                    out["inclusion_proof"] = {
+                        "index": p["index"], "tree_size": p["tree_size"],
+                        "root": p["root"].hex(),
+                        "path": [h.hex() for h in p["proof"]],
+                    }
+                except Exception:
+                    out["inclusion_proof"] = None
+            return out
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(500, f"extraction failed: {type(e).__name__}")
     finally:
@@ -78,23 +97,6 @@ async def attribute(file: UploadFile = File(...)):
             tmpdir.rmdir()
         except OSError:
             pass
-
-    out = v.to_dict()
-    out["source_filename"] = file.filename
-
-    # Attach the Merkle proof so the technical layer can show the real path
-    # rather than asserting one exists.
-    if v.ledger_index is not None:
-        try:
-            p = _led().prove_inclusion(v.ledger_index)
-            out["inclusion_proof"] = {
-                "index": p["index"], "tree_size": p["tree_size"],
-                "root": p["root"].hex(),
-                "path": [h.hex() for h in p["proof"]],
-            }
-        except Exception:
-            out["inclusion_proof"] = None
-    return out
 
 
 class AttributePath(BaseModel):
@@ -108,23 +110,25 @@ def attribute_path(body: AttributePath):
     if not target.exists():
         raise HTTPException(404, "that file is no longer present")
     try:
-        v = investigate(target, _led())
+        with _led() as led_node:
+            v = investigate(target, led_node)
+            out = v.to_dict()
+            out["source_filename"] = target.name
+            if v.ledger_index is not None:
+                try:
+                    p = led_node.prove_inclusion(v.ledger_index)
+                    out["inclusion_proof"] = {
+                        "index": p["index"], "tree_size": p["tree_size"],
+                        "root": p["root"].hex(),
+                        "path": [h.hex() for h in p["proof"]],
+                    }
+                except Exception:
+                    out["inclusion_proof"] = None
+            return out
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(500, f"extraction failed: {type(e).__name__}")
-
-    out = v.to_dict()
-    out["source_filename"] = target.name
-    if v.ledger_index is not None:
-        try:
-            p = _led().prove_inclusion(v.ledger_index)
-            out["inclusion_proof"] = {
-                "index": p["index"], "tree_size": p["tree_size"],
-                "root": p["root"].hex(),
-                "path": [h.hex() for h in p["proof"]],
-            }
-        except Exception:
-            out["inclusion_proof"] = None
-    return out
 
 
 # --------------------------------------------------------------------- B2
@@ -136,15 +140,15 @@ def event(index: int):
     Returns the exact bytes that were signed, so the UI can show in Act 2 the
     same signature Act 5 later verifies -- and a viewer can check they match.
     """
-    L = _led()
-    if index < 0 or index >= L.size():
-        raise HTTPException(404, "no such decryption event")
-    sr = L.get(index)
-    if sr is None:
-        raise HTTPException(404, "no such decryption event")
+    with _led() as L:
+        if index < 0 or index >= L.size():
+            raise HTTPException(404, "no such decryption event")
+        sr = L.get(index)
+        if sr is None:
+            raise HTTPException(404, "no such decryption event")
 
-    rec = sr.record
-    proof = L.prove_inclusion(index)
+        rec = sr.record
+        proof = L.prove_inclusion(index)
     return {
         "index": index,
         "record": rec.to_dict(),
@@ -177,27 +181,28 @@ def verify_signature(body: VerifyBody):
     Deliberately recomputes rather than reading a stored flag: the point of the
     'verify it yourself' action is that it performs the verification live.
     """
-    L = _led()
-    if body.index < 0 or body.index >= L.size():
-        raise HTTPException(404, "no such decryption event")
-    sr = L.get(body.index)
-    if sr is None:
-        raise HTTPException(404, "no such decryption event")
+    with _led() as L:
+        if body.index < 0 or body.index >= L.size():
+            raise HTTPException(404, "no such decryption event")
+        sr = L.get(body.index)
+        if sr is None:
+            raise HTTPException(404, "no such decryption event")
 
-    signed = rec_bytes = sr.record.canonical_bytes()
-    sig_ok = verify(sr.sig_public, signed, sr.signature)
+        signed = rec_bytes = sr.record.canonical_bytes()
+        sig_ok = verify(sr.sig_public, signed, sr.signature)
 
-    proof = L.prove_inclusion(body.index)
-    incl_ok = verify_inclusion(
-        hash_leaf(sr.leaf_bytes()), body.index, proof["tree_size"],
-        proof["proof"], proof["root"])
+        proof = L.prove_inclusion(body.index)
+        incl_ok = verify_inclusion(
+            hash_leaf(sr.leaf_bytes()), body.index, proof["tree_size"],
+            proof["proof"], proof["root"])
 
-    # Negative control: flipping one byte of the signed message must fail.
-    mutated = bytearray(rec_bytes)
-    mutated[len(mutated) // 2] ^= 0x01
-    control_fails = not verify(sr.sig_public, bytes(mutated), sr.signature)
+        # Negative control: flipping one byte of the signed message must fail.
+        mutated = bytearray(rec_bytes)
+        mutated[len(mutated) // 2] ^= 0x01
+        control_fails = not verify(sr.sig_public, bytes(mutated), sr.signature)
 
-    tampered, bad_idx, msg = L.detect_tamper()
+        tampered, bad_idx, msg = L.detect_tamper()
+
 
     return {
         "index": body.index,
@@ -342,40 +347,44 @@ def ledger_chain():
     content -- which is what makes tampering *locatable* rather than merely
     detectable.
     """
-    L = _led()
-    tampered, bad_idx, msg = L.detect_tamper()
-    sth = L.latest_sth()
+    with _led() as L:
+        tampered, bad_idx, msg = L.detect_tamper()
+        sth = L.latest_sth()
 
-    rows = []
-    for idx, sr in L.all_records():
-        rec = sr.record
-        leaf = hash_leaf(sr.leaf_bytes()).hex()
-        # A record is intact when its stored bytes still hash to the leaf that
-        # was committed, AND its own signature still verifies.
-        sig_ok = verify(sr.sig_public, rec.canonical_bytes(), sr.signature)
-        rows.append({
-            "index": idx,
-            "user_id": rec.recipient_user_id,
-            "fingerprint": rec.recipient_fingerprint,
-            "doc_id": rec.doc_id,
-            "session_id": rec.session_id,
-            "timestamp": rec.timestamp,
-            "n_bits": rec.n_bits,
-            "leaf_hash": leaf,
-            "signature_valid": sig_ok,
-            "signature_len": len(sr.signature),
-            "broken": (bad_idx is not None and idx == bad_idx) or not sig_ok,
-        })
+        rows = []
+        for idx, sr in L.all_records():
+            rec = sr.record
+            leaf = hash_leaf(sr.leaf_bytes()).hex()
+            # A record is intact when its stored bytes still hash to the leaf that
+            # was committed, AND its own signature still verifies.
+            sig_ok = verify(sr.sig_public, rec.canonical_bytes(), sr.signature)
+            rows.append({
+                "index": idx,
+                "user_id": rec.recipient_user_id,
+                "fingerprint": rec.recipient_fingerprint,
+                "doc_id": rec.doc_id,
+                "session_id": rec.session_id,
+                "timestamp": rec.timestamp,
+                "n_bits": rec.n_bits,
+                "leaf_hash": leaf,
+                "signature_valid": sig_ok,
+                "signature_len": len(sr.signature),
+                "broken": (bad_idx is not None and idx == bad_idx) or not sig_ok,
+            })
+
+        size = L.size()
+        root_hex = L.root().hex()
+        sth_valid = L.verify_sth(sth) if sth else False
 
     return {
-        "size": L.size(),
-        "root": L.root().hex(),
+        "size": size,
+        "root": root_hex,
         "sth": {
             "tree_size": sth["tree_size"],
             "root": sth["root"].hex(),
             "signed_at": sth["signed_at"],
             "signature_bytes": len(sth["signature"]),
-            "valid": L.verify_sth(sth),
+            "valid": sth_valid,
             "algorithm": "ML-DSA-65",
         } if sth else None,
         "integrity": {
@@ -387,26 +396,83 @@ def ledger_chain():
     }
 
 
+def demo_reset_action() -> dict:
+    """Execute demo_reset.py to return to a clean ledger and pristine demo environment."""
+    import gc
+    import subprocess
+    import sys
+
+    # Close any cached wizard ledger connection
+    try:
+        from .wizard import _close_led
+        _close_led()
+    except Exception:
+        pass
+
+    _TAMPER_BACKUP.clear()
+    gc.collect()
+
+    reset_script = ROOT / "demo_reset.py"
+    stdout_msg = ""
+    try:
+        res = subprocess.run(
+            [sys.executable, str(reset_script)],
+            cwd=str(ROOT),
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=120,
+        )
+        stdout_msg = res.stdout
+    except Exception as e:
+        # Fallback to in-process execution if subprocess invocation fails
+        try:
+            import demo_reset
+            res_dict = demo_reset.run_reset()
+            stdout_msg = f"in-process run_reset completed: doc_id {res_dict['doc_id']}"
+        except Exception as inner_e:
+            raise HTTPException(500, f"demo reset failed: {e}; inner: {inner_e}")
+
+    # Verify the ledger is now clean and intact
+    with _led() as L:
+        tampered, bad_idx, msg = L.detect_tamper()
+        size = L.size()
+
+    if tampered:
+        raise HTTPException(500, f"ledger reset verification failed: {msg}")
+
+    return {
+        "ok": True,
+        "clean": True,
+        "tampered": False,
+        "size": size,
+        "message": msg,
+        "stdout": stdout_msg,
+    }
+
+
+@router.post("/reset")
+@router.post("/demo/reset")
+def api_demo_reset():
+    """Run demo_reset.py to restore a clean ledger and pristine demo environment."""
+    return demo_reset_action()
+
+
 @router.post("/ledger/restore")
 def ledger_restore():
     """Undo the demo tamper by restoring the damaged record from its backup.
 
-    The obvious implementation -- shell out to demo_reset.py -- cannot work:
-    this server holds an open SQLite handle, so Windows refuses to delete the
-    file and the restore fails every time. Instead the tamper endpoint keeps
-    the original row, and this puts it back through the same connection.
-
-    Only possible because tampering here is a demo affordance. A real
-    deployment has no such button; that is the whole point of the ledger.
+    If no tamper backup exists or if the ledger remains tampered, runs demo_reset.py
+    to rebuild a guaranteed clean, verified ledger.
     """
     import sqlite3
 
     if not _TAMPER_BACKUP:
-        tampered, _, msg = _led().detect_tamper()
+        with _led() as L:
+            tampered, _, msg = L.detect_tamper()
         if tampered:
-            raise HTTPException(
-                409, "this ledger was altered outside the demo and cannot be "
-                     "repaired from here")
+            res = demo_reset_action()
+            return {"restored": True, "message": res["message"]}
         return {"restored": True, "message": msg}
 
     db = sqlite3.connect(str(HOME / "ledger.db"))
@@ -418,8 +484,14 @@ def ledger_restore():
         db.close()
     _TAMPER_BACKUP.clear()
 
-    tampered, _, msg = _led().detect_tamper()
+    with _led() as L:
+        tampered, _, msg = L.detect_tamper()
+    if tampered:
+        res = demo_reset_action()
+        return {"restored": True, "message": res["message"]}
+
     return {"restored": not tampered, "message": msg}
+
 
 
 # --------------------------------------------------------------------- B6

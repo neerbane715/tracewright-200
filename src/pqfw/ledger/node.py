@@ -241,3 +241,10 @@ class LedgerNode:
 
     def close(self) -> None:
         self.db.close()
+
+    def __enter__(self) -> LedgerNode:
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
+        self.close()
+
