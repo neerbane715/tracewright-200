@@ -10,7 +10,6 @@ could not later defend is a feature; surfacing it as a mid-demo crash is not.
 """
 from __future__ import annotations
 
-import shutil
 import uuid
 from pathlib import Path
 
