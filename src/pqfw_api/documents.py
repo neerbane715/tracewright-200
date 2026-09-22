@@ -194,15 +194,19 @@ def _display_name_for(pdf_path: Path) -> str:
 
     Read from the sidecar JSON written at upload time. The sidecar's
     contents are display-only -- this never feeds into any path -- and a
-    missing or corrupt sidecar (older upload, partial write) just falls
-    back to the stored filename (the uuid) rather than breaking the listing.
+    missing or corrupt sidecar (older upload, partial write, or a top-level
+    JSON value that isn't an object -- e.g. tampering or a partial write
+    that produced valid JSON of the wrong shape) falls back to the stored
+    filename (the uuid) rather than breaking, or silently dropping, the
+    listing.
     """
+    fallback = pdf_path.name
     sidecar = pdf_path.with_suffix(".json")
     try:
-        data = json.loads(sidecar.read_text())
-        name = data.get("display_name")
-        if isinstance(name, str) and name:
-            return name
+        data = json.loads(sidecar.read_text(encoding="utf-8"))
     except (OSError, ValueError):
-        pass
-    return pdf_path.name
+        return fallback
+    if not isinstance(data, dict):
+        return fallback
+    name = data.get("display_name")
+    return name if isinstance(name, str) and name.strip() else fallback

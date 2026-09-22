@@ -144,6 +144,37 @@ def test_uploaded_display_name_survives_into_listing(client):
     assert "quarterly-report" not in match["path"]
 
 
+def test_malformed_sidecar_falls_back_without_dropping_the_document(client):
+    """A sidecar whose top-level JSON isn't an object must not vanish the
+    upload from the listing.
+
+    json.loads() happily parses `[1,2,3]`, `"foo"`, `42`, and `null` as
+    valid JSON -- calling .get("display_name") on any of those raises
+    AttributeError, not the (OSError, ValueError) that a naive fallback
+    might only guard against. If that AttributeError escapes, it propagates
+    to list_documents()'s outer `except Exception: continue`, and the whole
+    document silently disappears from the picker instead of just showing an
+    ugly name. This is the assertion that would have caught that.
+    """
+    if not TENDER.exists():
+        pytest.skip("demo document not generated")
+    with TENDER.open("rb") as fh:
+        r = client.post("/api/documents",
+                        files={"file": ("will-be-tampered.pdf", fh,
+                                        "application/pdf")})
+    assert r.status_code == 200
+    doc_id = r.json()["id"]
+
+    # Simulate tampering / a partial write: valid JSON, wrong top-level shape.
+    sidecar = UPLOADS / f"{doc_id}.json"
+    sidecar.write_text("[1, 2, 3]")
+
+    listing = client.get("/api/documents").json()
+    match = next((d for d in listing if d["id"] == doc_id), None)
+    assert match is not None, "malformed sidecar must not drop the document"
+    assert match["display_name"] == f"{doc_id}.pdf"
+
+
 def test_uploads_listing_is_capped(client):
     """GET /api/documents caps the uploads shown, newest first, without
     deleting anything from disk."""
