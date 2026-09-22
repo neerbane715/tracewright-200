@@ -120,6 +120,52 @@ def test_upload_refuses_thin_pdf_with_numbers(client, tmp_path):
     assert r.json()["sufficient"] is False   # ...but flagged unusable
 
 
+def test_uploaded_display_name_survives_into_listing(client):
+    """The operator's filename must persist past the initial response.
+
+    GET /api/documents used to fall back to the stored uuid filename because
+    nothing persisted the original name, so a reload made every upload
+    indistinguishable. The sidecar JSON fixes that.
+    """
+    if not TENDER.exists():
+        pytest.skip("demo document not generated")
+    with TENDER.open("rb") as fh:
+        r = client.post("/api/documents",
+                        files={"file": ("quarterly-report.pdf", fh,
+                                        "application/pdf")})
+    assert r.status_code == 200
+    doc_id = r.json()["id"]
+
+    listing = client.get("/api/documents").json()
+    match = next((d for d in listing if d["id"] == doc_id), None)
+    assert match is not None, "uploaded document missing from listing"
+    assert match["display_name"] == "quarterly-report.pdf"
+    # The security property must still hold: display_name never leaks into path.
+    assert "quarterly-report" not in match["path"]
+
+
+def test_uploads_listing_is_capped(client):
+    """GET /api/documents caps the uploads shown, newest first, without
+    deleting anything from disk."""
+    if not TENDER.exists():
+        pytest.skip("demo document not generated")
+
+    n_to_create = documents.UPLOAD_LISTING_CAP + 3
+    for _ in range(n_to_create):
+        with TENDER.open("rb") as fh:
+            r = client.post("/api/documents",
+                            files={"file": ("cap-test.pdf", fh,
+                                            "application/pdf")})
+            assert r.status_code == 200
+
+    on_disk = list(UPLOADS.glob("*.pdf"))
+    assert len(on_disk) >= n_to_create, "uploads must not be deleted from disk"
+
+    listing = client.get("/api/documents").json()
+    uploaded = [d for d in listing if not d.get("bundled")]
+    assert len(uploaded) == documents.UPLOAD_LISTING_CAP
+
+
 def test_stage_leak_does_not_reveal_source(client):
     """The central guarantee: staging may KNOW the source, never TELL it.
 

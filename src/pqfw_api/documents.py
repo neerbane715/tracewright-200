@@ -10,6 +10,7 @@ could not later defend is a feature; surfacing it as a mid-demo crash is not.
 """
 from __future__ import annotations
 
+import json
 import uuid
 from pathlib import Path
 
@@ -67,6 +68,9 @@ router = APIRouter(prefix="/api", tags=["documents"])
 
 MAX_UPLOAD_BYTES = 25 * 1024 * 1024
 PDF_MAGIC = b"%PDF"
+# How many uploads (beyond the always-present bundled sample) the listing
+# shows, newest first. A listing cap only -- nothing is deleted from disk.
+UPLOAD_LISTING_CAP = 8
 
 
 def _safe_unlink(path: Path) -> None:
@@ -134,9 +138,19 @@ async def upload_document(file: UploadFile = File(...)):
         _safe_unlink(stored)
         raise HTTPException(400, "that PDF could not be analysed")
 
+    display_name = file.filename or "document.pdf"
+
+    # Sidecar is display-only: never let it influence any path. All paths
+    # are derived from doc_id alone, both here and in list_documents().
+    sidecar = UPLOADS / f"{doc_id}.json"
+    try:
+        sidecar.write_text(json.dumps({"display_name": display_name}))
+    except OSError:
+        pass  # Best-effort; the listing falls back to the stored filename.
+
     return {
         "id": doc_id,
-        "display_name": file.filename or "document.pdf",
+        "display_name": display_name,
         # Relative to DEMO, which is what /api/encrypt resolves against.
         "path": f"uploads/{doc_id}.pdf",
         **info,
@@ -159,12 +173,13 @@ def list_documents():
         except Exception:
             pass
 
-    for p in sorted(UPLOADS.glob("*.pdf"),
-                    key=lambda q: q.stat().st_mtime, reverse=True):
+    uploads = sorted(UPLOADS.glob("*.pdf"),
+                     key=lambda q: q.stat().st_mtime, reverse=True)
+    for p in uploads[:UPLOAD_LISTING_CAP]:
         try:
             out.append({
                 "id": p.stem,
-                "display_name": p.name,
+                "display_name": _display_name_for(p),
                 "path": f"uploads/{p.name}",
                 "bundled": False,
                 **analyse(p),
@@ -172,3 +187,22 @@ def list_documents():
         except Exception:
             continue
     return out
+
+
+def _display_name_for(pdf_path: Path) -> str:
+    """The operator-supplied filename for an uploaded PDF, if recorded.
+
+    Read from the sidecar JSON written at upload time. The sidecar's
+    contents are display-only -- this never feeds into any path -- and a
+    missing or corrupt sidecar (older upload, partial write) just falls
+    back to the stored filename (the uuid) rather than breaking the listing.
+    """
+    sidecar = pdf_path.with_suffix(".json")
+    try:
+        data = json.loads(sidecar.read_text())
+        name = data.get("display_name")
+        if isinstance(name, str) and name:
+            return name
+    except (OSError, ValueError):
+        pass
+    return pdf_path.name
