@@ -23,10 +23,14 @@ export interface OpenedCopy {
 interface RunState {
   bundle: EncryptResult | null;
   setBundle: (b: EncryptResult | null) => void;
+  documentPath: string | null;
+  setDocumentPath: (p: string | null) => void;
   opened: OpenedCopy[];
   addOpened: (c: OpenedCopy) => void;
   leaked: OpenedCopy | null;
   setLeaked: (c: OpenedCopy | null) => void;
+  chosenLeaker: string | null;
+  setChosenLeaker: (u: string | null) => void;
   reset: () => void;
 }
 
@@ -34,8 +38,10 @@ const Ctx = createContext<RunState | null>(null);
 
 export function RunProvider({ children }: { children: ReactNode }) {
   const [bundle, setBundle] = useState<EncryptResult | null>(null);
+  const [documentPath, setDocumentPath] = useState<string | null>(null);
   const [opened, setOpened] = useState<OpenedCopy[]>([]);
   const [leaked, setLeaked] = useState<OpenedCopy | null>(null);
+  const [chosenLeaker, setChosenLeaker] = useState<string | null>(null);
 
   const addOpened = useCallback((c: OpenedCopy) => {
     setOpened((prev) => [...prev.filter((p) => p.userId !== c.userId), c]);
@@ -43,13 +49,27 @@ export function RunProvider({ children }: { children: ReactNode }) {
 
   const reset = useCallback(() => {
     setBundle(null);
+    setDocumentPath(null);
     setOpened([]);
     setLeaked(null);
+    setChosenLeaker(null);
   }, []);
 
   const value = useMemo(
-    () => ({ bundle, setBundle, opened, addOpened, leaked, setLeaked, reset }),
-    [bundle, opened, leaked, addOpened, reset],
+    () => ({
+      bundle,
+      setBundle,
+      documentPath,
+      setDocumentPath,
+      opened,
+      addOpened,
+      leaked,
+      setLeaked,
+      chosenLeaker,
+      setChosenLeaker,
+      reset,
+    }),
+    [bundle, documentPath, opened, leaked, chosenLeaker, addOpened, reset],
   );
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

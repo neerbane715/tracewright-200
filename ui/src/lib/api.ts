@@ -124,12 +124,29 @@ export const api = {
   },
 };
 
+/** Upload a document for distribution. Separate from api.upload only because
+ *  an object literal cannot reference itself during construction. */
+export const uploadDocument = (file: File) =>
+  api.upload<DocumentInfo>("/api/documents", file, 120_000);
+
 /* ------------------------------------------------------------------ types */
 
 export interface Identity {
   user_id: string;
   fingerprint: string;
   has_secret: boolean;
+}
+
+export interface DocumentInfo {
+  id: string;
+  display_name: string;
+  path: string;
+  bundled?: boolean;
+  pages: number;
+  capacity_bits: number;
+  required_bits: number;
+  sufficient: boolean;
+  max_recipients: number;
 }
 
 export interface EncryptResult {
