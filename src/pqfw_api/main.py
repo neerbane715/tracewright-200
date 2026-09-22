@@ -23,7 +23,7 @@ from pqfw.ledger.node import LedgerNode
 from pqfw.ledger import gossip as gsp
 from pqfw.watermark import engine, tardos
 
-from . import attribute, wizard
+from . import attribute, documents, wizard
 from .paths import DEMO, HOME, ROOT, ensure_seeded
 
 ensure_seeded()
@@ -38,6 +38,7 @@ app.add_middleware(
 )
 app.include_router(wizard.router)
 app.include_router(attribute.router)
+app.include_router(documents.router)
 
 
 def _resolve(p: str | Path) -> Path:
