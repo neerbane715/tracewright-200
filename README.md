@@ -86,7 +86,7 @@ consistency proofs provide exactly that.
 | Destroyed by | screenshot, print-to-PDF, copy-paste |
 | ML-KEM encapsulation, 100 recipients | 0.37 s |
 | ML-DSA sign / verify | 38 ms / 10 ms |
-| Tests | 33 passing |
+| Tests | 55 passing |
 
 ## Limits, stated plainly
 

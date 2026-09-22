@@ -167,7 +167,7 @@ python -m pqfw.cli investigate frank.pdf
 
 | Command | Covers | Time |
 |---|---|---|
-| `python -m pytest tests/ -q` | 53 backend tests | ~48 s + several min for the `slow` e2e test |
+| `python -m pytest tests/ -q` | 55 backend tests | ~48 s + several min for the `slow` e2e test |
 | `python -m pytest tests/ -q -m "not slow"` | same, skipping the slow e2e attribution test | ~48 s |
 | `python ui/verify_full.py` | 36 integration checks | ~4 min |
 | `python ui/verify_offline.py` | air-gap proof, 9 checks | ~3 min |

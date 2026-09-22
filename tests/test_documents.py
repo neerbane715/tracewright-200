@@ -228,8 +228,25 @@ def test_stage_leak_does_not_reveal_source(client):
 UPLOAD_DOC = ROOT / "demo-docs" / "board-inquiry.pdf"
 
 
+@pytest.fixture(scope="module")
+def upload_doc():
+    """Ensure demo-docs/board-inquiry.pdf exists, generating it if not.
+
+    That file is gitignored (only tender-evaluation.pdf is allow-listed in
+    .gitignore), so on a fresh clone or CI runner it is simply absent. The
+    test this feeds is the spec's designated end-to-end proof and must
+    actually run rather than silently skip, so build the document instead of
+    skipping when it is missing.
+    """
+    if not UPLOAD_DOC.exists():
+        import spike.make_upload_doc as make_upload_doc
+        make_upload_doc.build(str(UPLOAD_DOC))
+    assert UPLOAD_DOC.exists()
+    return UPLOAD_DOC
+
+
 @pytest.mark.slow
-def test_chosen_leaker_is_correctly_attributed(tmp_path):
+def test_chosen_leaker_is_correctly_attributed(tmp_path, upload_doc):
     """Choose each recipient in turn; attribution must name that person.
 
     Runs against the engine directly rather than the API so it does not
@@ -243,9 +260,6 @@ def test_chosen_leaker_is_correctly_attributed(tmp_path):
     from pqfw.forensics.investigate import Outcome, investigate
     from pqfw.identity import Keystore
     from pqfw.ledger.node import LedgerNode
-
-    if not UPLOAD_DOC.exists():
-        pytest.skip("run: python spike/make_upload_doc.py demo-docs/board-inquiry.pdf")
 
     users = ["alice", "bob", "carol", "dave", "erin"]
     ks = Keystore(tmp_path / "keys")
@@ -266,3 +280,75 @@ def test_chosen_leaker_is_correctly_attributed(tmp_path):
         assert v.cryptographically_verified
 
     led.close()
+
+
+def test_upload_recreates_missing_uploads_dir(client):
+    """A wiped uploads/ directory must not turn the next upload into a 500.
+
+    demo_reset.py's cleanup rmtree's all of demo/, including demo/uploads/,
+    and (before this fix) nothing recreated it until the process restarted.
+    UPLOADS is only created once, at module import, so any later removal was
+    permanent for the life of the process -- and POST /api/documents raised
+    an uncaught FileNotFoundError writing into a directory that no longer
+    existed. The endpoint must now recreate its own directory on demand.
+
+    The backup lives under DEMO (a sibling of UPLOADS) rather than under
+    pytest's tmp_path: tmp_path is created on the system temp drive, which on
+    Windows CI/dev boxes is routinely a different drive letter than the repo,
+    and Path.rename() cannot cross drives.
+    """
+    if not TENDER.exists():
+        pytest.skip("demo document not generated")
+
+    moved_aside = DEMO / "uploads-backup-for-test"
+    try:
+        assert UPLOADS.exists()
+        UPLOADS.rename(moved_aside)
+        assert not UPLOADS.exists()
+
+        with TENDER.open("rb") as fh:
+            r = client.post("/api/documents",
+                            files={"file": ("resurrected.pdf", fh,
+                                            "application/pdf")})
+        assert r.status_code == 200, r.text
+        assert UPLOADS.exists()
+    finally:
+        # Restore original state: fold back anything the test's own upload
+        # left behind, then remove the directory this test created so the
+        # next test sees the pre-existing uploads/ contents again.
+        if moved_aside.exists():
+            if UPLOADS.exists():
+                for item in UPLOADS.iterdir():
+                    item.rename(moved_aside / item.name)
+                UPLOADS.rmdir()
+            moved_aside.rename(UPLOADS)
+
+
+def test_uploads_directory_stays_bounded_after_repeated_uploads(client):
+    """Repeated uploads must not let uploads/ grow without bound on disk.
+
+    UPLOAD_LISTING_CAP only ever capped what GET /api/documents *shows*;
+    nothing pruned the files themselves, so the directory grew forever (the
+    working tree had accumulated dozens of stale PDFs before this fix, since
+    demo_reset.py wiping the whole demo/ tree was the only thing that ever
+    cleared it). Uploading past the retention cap must prune the oldest
+    files -- and their sidecars -- down to the cap, not just hide them from
+    the listing.
+    """
+    if not TENDER.exists():
+        pytest.skip("demo document not generated")
+
+    n_to_create = documents.UPLOAD_RETENTION_CAP + 5
+    for _ in range(n_to_create):
+        with TENDER.open("rb") as fh:
+            r = client.post("/api/documents",
+                            files={"file": ("bound-test.pdf", fh,
+                                            "application/pdf")})
+            assert r.status_code == 200
+
+    on_disk_pdfs = list(UPLOADS.glob("*.pdf"))
+    on_disk_json = list(UPLOADS.glob("*.json"))
+    assert len(on_disk_pdfs) <= documents.UPLOAD_RETENTION_CAP
+    # No orphaned sidecars left behind by the prune.
+    pdf_stems = {p.stem for p in on_disk_pdfs}
+    assert all(j.stem in pdf_stems for j in on_disk_json)

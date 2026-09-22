@@ -72,6 +72,12 @@ PDF_MAGIC = b"%PDF"
 # shows, newest first. A listing cap only -- nothing is deleted from disk.
 UPLOAD_LISTING_CAP = 8
 
+# How many uploaded PDFs are retained on disk after a successful upload.
+# Unlike UPLOAD_LISTING_CAP this one does delete: without it uploads/
+# accumulates forever, since demo_reset.py wiping the whole demo/ tree was
+# previously the only thing pruning this directory.
+UPLOAD_RETENTION_CAP = 20
+
 
 def _safe_unlink(path: Path) -> None:
     """Best-effort cleanup of a rejected upload.
@@ -91,6 +97,31 @@ def _safe_unlink(path: Path) -> None:
             if attempt == 4:
                 return
             time.sleep(0.05)
+
+
+def _prune_uploads(keep: int = UPLOAD_RETENTION_CAP) -> None:
+    """Keep only the newest `keep` uploaded PDFs (plus their sidecars).
+
+    Best-effort and silent: a prune failure (locked file, race with another
+    request, permissions) must never fail the upload that triggered it. Also
+    removes orphaned sidecars -- a .json whose .pdf is already gone -- so
+    those do not accumulate either.
+    """
+    try:
+        pdfs = sorted(UPLOADS.glob("*.pdf"),
+                      key=lambda q: q.stat().st_mtime, reverse=True)
+        for stale in pdfs[keep:]:
+            stale.unlink(missing_ok=True)
+            stale.with_suffix(".json").unlink(missing_ok=True)
+
+        # Orphaned sidecars: a .json left behind by a .pdf that is gone
+        # (pruned above, or removed by some other path entirely).
+        kept_stems = {p.stem for p in pdfs[:keep]}
+        for sc in UPLOADS.glob("*.json"):
+            if sc.stem not in kept_stems and not sc.with_suffix(".pdf").exists():
+                sc.unlink(missing_ok=True)
+    except Exception:
+        pass
 
 
 @router.post("/documents")
@@ -113,6 +144,11 @@ async def upload_document(file: UploadFile = File(...)):
 
     doc_id = uuid.uuid4().hex
     stored = UPLOADS / f"{doc_id}.pdf"
+    # Self-healing: UPLOADS is created at module import, but a demo reset (or
+    # anything else that wipes DEMO/uploads mid-process) removes it for the
+    # life of this process since nothing re-creates it afterward. Guard right
+    # before the write so the endpoint works regardless of who wiped what.
+    stored.parent.mkdir(parents=True, exist_ok=True)
     stored.write_bytes(raw)
 
     d = None
@@ -147,6 +183,8 @@ async def upload_document(file: UploadFile = File(...)):
         sidecar.write_text(json.dumps({"display_name": display_name}))
     except OSError:
         pass  # Best-effort; the listing falls back to the stored filename.
+
+    _prune_uploads()
 
     return {
         "id": doc_id,

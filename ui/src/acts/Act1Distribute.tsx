@@ -196,11 +196,22 @@ export default function Act1Distribute() {
                     {chosenDoc.max_recipients} recipients.
                   </p>
                 ) : (
-                  <p className="mt-1 text-tiny text-[color:var(--danger,#b4242a)]">
-                    Too little body text to mark safely. The system refuses to
-                    issue a copy it could not later attribute. Choose the
-                    sample document instead.
-                  </p>
+                  <div className="mt-1">
+                    <p className="text-tiny text-[color:var(--danger,#b4242a)]">
+                      Too little body text to mark safely. The system refuses to
+                      issue a copy it could not later attribute. Choose the
+                      sample document instead.
+                    </p>
+                    {docs.some((d) => d.bundled) && (
+                      <button
+                        type="button"
+                        onClick={() => setChosenDoc(docs.find((d) => d.bundled) ?? null)}
+                        className="mt-2 rounded-md border border-line bg-surface px-3 py-1.5 text-tiny text-ink-dim transition-colors duration-fast hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--btn-primary-bg)]"
+                      >
+                        Use the sample document
+                      </button>
+                    )}
+                  </div>
                 )}
               </section>
             )}

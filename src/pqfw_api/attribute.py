@@ -46,6 +46,10 @@ def _led() -> LedgerNode:
 def _safe(p: str | Path) -> Path:
     """Resolve a client path inside the project, never outside it."""
     cand = (DEMO / Path(p)).resolve() if not Path(p).is_absolute() else Path(p).resolve()
+    # The UPLOADS check is intentionally redundant: UPLOADS is always a
+    # subdirectory of DEMO (see paths.py), so is_relative_to(DEMO.resolve())
+    # already covers it. Left in, with this comment, so a future reader does
+    # not assume it is load-bearing or try to "clean it up" by removing it.
     if not (cand.is_relative_to(DEMO.resolve())
             or cand.is_relative_to(ROOT.resolve())
             or cand.is_relative_to(UPLOADS.resolve())):

@@ -38,7 +38,7 @@ export default function Act5Attribute() {
   const nav = useNavigate();
   const loc = useLocation() as { state?: { path?: string } };
   const staged = loc.state?.path;
-  const { reset: resetRun, chosenLeaker } = useRun();
+  const { reset: resetRun, chosenLeaker, setChosenLeaker } = useRun();
 
   const [verdict, setVerdict] = useState<FullVerdict | null>(null);
   const [busy, setBusy] = useState(false);
@@ -84,6 +84,11 @@ export default function Act5Attribute() {
     setErr(null);
     setVerdict(null);
     setSubject(file.name);
+    // The staged-leak comparison panel below only makes sense against the
+    // artefact that was actually staged in Act 4. A fresh upload here is an
+    // unrelated file -- without this it kept "You staged: <name>" attached
+    // to whatever verdict came back next, mislabelling the new document.
+    setChosenLeaker(null);
     try {
       setVerdict(await api.upload<FullVerdict>("/api/attribute", file, 180_000));
     } catch (e) {
@@ -169,6 +174,16 @@ export default function Act5Attribute() {
             <p className="mt-2 text-tiny text-verified">
               Match. The name was recovered from the file's own geometry — it was
               never sent to this screen.
+            </p>
+          ) : verdict.outcome === "NO_WATERMARK" ? (
+            <p className="mt-2 text-tiny text-ink-dim">
+              No mark was found in this file, so there is nobody to name. That is
+              the correct answer for a document this system never distributed.
+            </p>
+          ) : verdict.outcome === "LEDGER_COMPROMISED" ? (
+            <p className="mt-2 text-tiny text-ink-dim">
+              The ledger's integrity check failed, so attribution is withheld.
+              Rebuild a clean ledger in Act 3 and try again.
             </p>
           ) : (
             <p className="mt-2 text-tiny text-ink-dim">
