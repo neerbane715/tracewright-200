@@ -4,6 +4,7 @@ See docs/superpowers/specs/2026-09-22-upload-and-choose-leaker-design.md
 """
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -117,3 +118,31 @@ def test_upload_refuses_thin_pdf_with_numbers(client, tmp_path):
                         files={"file": ("thin.pdf", fh, "application/pdf")})
     assert r.status_code == 200          # accepted for inspection...
     assert r.json()["sufficient"] is False   # ...but flagged unusable
+
+
+def test_stage_leak_does_not_reveal_source(client):
+    """The central guarantee: staging may KNOW the source, never TELL it.
+
+    A previous build computed the verdict while staging and had the next
+    screen replay it under the label "Extracted watermark". Since the operator
+    now names the source explicitly, the only thing standing between that bug
+    and its return is this assertion.
+    """
+    ledger = client.get("/api/ledger").json()
+    if ledger["size"] == 0:
+        pytest.skip("no decryptions in the ledger; run demo_reset.py")
+
+    names = {r["user_id"] for r in ledger["records"]}
+    assert names, "ledger has records but no user_ids"
+
+    # Stage explicitly from one known recipient's copy.
+    victim = sorted(names)[0]
+    r = client.post("/api/stage-leak", json={"source": f"{victim}-copy.pdf"})
+    assert r.status_code == 200
+
+    blob = json.dumps(r.json()).lower()
+    for n in names:
+        assert n.lower() not in blob, (
+            f"stage-leak response leaked recipient '{n}': {blob}")
+    assert "ledger_index" not in r.json()
+    assert "user_id" not in r.json()
