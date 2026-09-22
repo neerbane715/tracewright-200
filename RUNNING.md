@@ -101,15 +101,25 @@ through.
 | Act | Route | What happens |
 |---|---|---|
 | 0 · Brief | `/` | The problem, before any cryptography |
-| 1 · Seal | `/distribute` | One encryption, one wrapped key per recipient |
+| 1 · Seal | `/distribute` | Upload a document (or use the bundled one), then one encryption, one wrapped key per recipient |
 | 2 · Open | `/open` | A recipient decrypts; the mark is made and signed |
 | 3 · Record | `/ledger` | The chain, and the tamper demonstration |
-| 4 · Breach | `/leak` | The document surfaces outside the list |
+| 4 · Breach | `/leak` | Choose whose copy surfaced — or let it pick at random |
 | 5 · Verdict | `/attribute` | Real extraction → who leaked it |
 
-**Ground truth:** `demo_reset.py` prints which recipient owns the leaked copy.
-It is usually `carol`. Act 4 picks at random from whoever has opened the
-document, so check the terminal if you want to know the answer in advance.
+**Ground truth:** In the UI, Act 4 lets you choose whose copy leaked from the
+recipients who actually opened it, so you set the answer yourself. *Surprise
+me* randomises instead, which is the better choice if someone suspects the
+demo is rigged — nobody in the room knows the answer, including you. Act 5 is
+never told either way; it extracts the mark from the file. For the CLI path,
+`demo_reset.py` prints the ground truth, usually `carol`.
+
+**Uploading your own document:** Act 1 accepts any PDF with a text layer. It
+is measured on upload and refused if it cannot carry a full codeword — roughly
+six pages of justified body text, or 1,534 bits for five recipients. A slide
+deck or a scan will be refused, and the screen says why. `demo-docs/
+board-inquiry.pdf` (`python spike/make_upload_doc.py`) is a second document
+generated for exactly this purpose: 10 pages, 2,300 bits.
 
 **Technical detail** (top right) reveals algorithm names, byte lengths, real
 signatures and the raw API responses on every screen. It persists across acts,
@@ -157,7 +167,8 @@ python -m pqfw.cli investigate frank.pdf
 
 | Command | Covers | Time |
 |---|---|---|
-| `python -m pytest tests/ -q` | 39 backend tests | ~48 s |
+| `python -m pytest tests/ -q` | 55 backend tests | ~48 s + several min for the `slow` e2e test |
+| `python -m pytest tests/ -q -m "not slow"` | same, skipping the slow e2e attribution test | ~48 s |
 | `python ui/verify_full.py` | 36 integration checks | ~4 min |
 | `python ui/verify_offline.py` | air-gap proof, 9 checks | ~3 min |
 | `python ui/verify_ui.py` | Acts 0–1 in a browser | ~30 s |

@@ -29,6 +29,9 @@ DOC = ROOT / "demo-docs" / "tender-evaluation.pdf"
 FALLBACK_DOC = ROOT / "spike" / "out" / "original.pdf"
 
 RECIPIENTS = ["alice", "bob", "carol", "dave", "erin"]
+# CLI ground truth only. The UI's Act 4 lets the operator choose the leaker
+# (or randomise), so this fixes the answer for `pqfw investigate` against the
+# seeded demo/ directory and nothing else.
 LEAKER = "carol"
 
 
@@ -84,6 +87,10 @@ def run_reset() -> dict:
     home = DEMO / "pqfw-data"
     home.mkdir(parents=True, exist_ok=True)
     (home / "keys").mkdir(parents=True, exist_ok=True)
+    # Recreate uploads/ too -- it lives under DEMO and _clean_demo_dir just
+    # wiped it. Reconstructed locally (DEMO / "uploads") rather than imported
+    # from pqfw_api.paths so this script stays usable without the API package.
+    (DEMO / "uploads").mkdir(parents=True, exist_ok=True)
 
     ks = Keystore(home / "keys")
     idents = [ks.create(u, overwrite=True) for u in RECIPIENTS]

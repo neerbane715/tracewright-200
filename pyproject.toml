@@ -33,3 +33,4 @@ include = ["pqfw*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = ["slow: end-to-end tests that seal and attribute real documents"]
