@@ -37,10 +37,14 @@ else:
 
 HOME = DEMO / "pqfw-data"
 WIZARD_HOME = DEMO / "wizard-data"
+# Operator-uploaded documents. Stored under generated names so that a
+# client-supplied filename never becomes a path component.
+UPLOADS = DEMO / "uploads"
 
 DEMO.mkdir(parents=True, exist_ok=True)
 HOME.mkdir(parents=True, exist_ok=True)
 WIZARD_HOME.mkdir(parents=True, exist_ok=True)
+UPLOADS.mkdir(parents=True, exist_ok=True)
 
 # Document paths
 TENDER_DOC = ROOT / "demo-docs" / "tender-evaluation.pdf"
