@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../lib/api";
 import { useRun } from "../lib/run";
@@ -23,25 +23,46 @@ interface Surfaced {
   title: string;
 }
 
+interface ChainRow {
+  index: number;
+  user_id: string;
+  timestamp: string;
+}
+
 export default function Act4Leak() {
   const nav = useNavigate();
-  const { opened, setLeaked } = useRun();
+  const { setLeaked, setChosenLeaker } = useRun();
   const [item, setItem] = useState<Surfaced | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<unknown>(null);
+  const [candidates, setCandidates] = useState<ChainRow[] | null>(null);
+  const [pick, setPick] = useState<string | null>(null);
 
-  const stage = async () => {
+  const loadCandidates = async () => {
+    try {
+      const chain = await api.get<{ records: ChainRow[] }>("/api/ledger/chain");
+      // One row per recipient — the most recent open wins.
+      const latest = new Map<string, ChainRow>();
+      for (const r of chain.records) latest.set(r.user_id, r);
+      setCandidates([...latest.values()].sort((a, b) => a.index - b.index));
+    } catch (e) {
+      setErr(e);
+    }
+  };
+
+  useEffect(() => {
+    void loadCandidates();
+  }, []);
+
+  const stage = async (who: string | null) => {
     setBusy(true);
     setErr(null);
     try {
-      // Prefer a copy from this run, so the story stays continuous. Falls back
-      // to whatever copies exist if the user skipped straight here.
-      const source =
-        opened.length > 0
-          ? opened[Math.floor(Math.random() * opened.length)]!.outputPath
-          : undefined;
+      // null => let the server choose at random ("Surprise me").
+      const source = who ? `${who}-copy.pdf` : undefined;
       const r = await api.post<Surfaced>("/api/stage-leak", { source });
       setItem(r);
+      setChosenLeaker(who); // remembered for Act 5's AFTER-the-fact comparison
       setLeaked(null); // Act 5 must not inherit an answer from here
     } catch (e) {
       setErr(e);
@@ -68,26 +89,71 @@ export default function Act4Leak() {
       {!item && (
         <section className="rounded-[var(--card-radius)] border border-line bg-surface p-6">
           <Scene />
-          <div className="mt-6 flex flex-wrap items-center gap-4">
-            <button
-              onClick={stage}
-              disabled={busy}
-              className="rounded-md bg-[var(--btn-primary-bg)] px-4 py-2.5 text-base font-medium text-[var(--btn-primary-ink)] transition-colors duration-fast hover:bg-[var(--btn-primary-bg-hover)] disabled:opacity-45"
-            >
-              {busy ? "Recovering the file…" : "Recover the leaked file"}
-            </button>
-            <p className="text-sm text-ink-faint">
-              {opened.length > 0
-                ? `One of the ${opened.length} copies opened in this run.`
-                : "One of the copies on record."}
-            </p>
-          </div>
           {err !== null && (
             <div className="mt-4">
               <ErrorPanel
                 error={err}
-                onRetry={stage}
-                context="recovering the leaked file"
+                onRetry={loadCandidates}
+                context="loading recipients from the ledger"
+              />
+            </div>
+          )}
+        </section>
+      )}
+
+      {!item && candidates && (
+        <section className="rounded-[var(--card-radius)] border border-line bg-surface p-6">
+          <h2 className="text-base font-medium">Whose copy surfaced?</h2>
+          <p className="mt-1 text-tiny text-ink-dim">
+            Only recipients who actually opened the document appear here — you
+            cannot leak a copy that was never made.
+          </p>
+          <ul className="mt-4 space-y-1.5">
+            {candidates.map((c) => (
+              <li key={c.user_id}>
+                <button
+                  type="button"
+                  onClick={() => setPick(c.user_id)}
+                  aria-pressed={pick === c.user_id}
+                  className={`flex w-full items-center gap-3 rounded-md border px-3 py-2 text-left
+                    ${pick === c.user_id ? "border-accent bg-accent/5" : "border-line"}`}
+                >
+                  <span className="font-medium">{c.user_id}</span>
+                  <span className="ml-auto font-mono text-tiny text-ink-faint">
+                    ledger #{c.index}
+                  </span>
+                </button>
+              </li>
+            ))}
+          </ul>
+          <div className="mt-5 flex flex-wrap gap-2">
+            <button
+              type="button"
+              disabled={!pick || busy}
+              onClick={() => void stage(pick)}
+              className="rounded-md bg-[var(--btn-primary-bg)] px-4 py-2.5 text-base font-medium text-[var(--btn-primary-ink)] transition-colors duration-fast hover:bg-[var(--btn-primary-bg-hover)] disabled:opacity-40"
+            >
+              {busy ? "Staging…" : "Stage the leak"}
+            </button>
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => void stage(null)}
+              className="rounded-md border border-[var(--btn-ghost-border)] px-3.5 py-2 text-sm transition-colors duration-fast hover:border-ink-faint"
+            >
+              Surprise me
+            </button>
+          </div>
+          <p className="mt-3 text-micro text-ink-faint">
+            Either way, the next screen is not told. It extracts the mark from
+            the file itself.
+          </p>
+          {err !== null && (
+            <div className="mt-4">
+              <ErrorPanel
+                error={err}
+                onRetry={() => void stage(pick)}
+                context="staging the leaked file"
               />
             </div>
           )}
@@ -136,6 +202,12 @@ export default function Act4Leak() {
                   head={20}
                   note="what an investigator would record first"
                 />
+                <a
+                  href={`/api/download?file=${encodeURIComponent(item.filename)}`}
+                  className="inline-block rounded-md border border-line px-3 py-1.5 text-tiny"
+                >
+                  Download this file
+                </a>
               </div>
             </div>
 
@@ -170,7 +242,10 @@ export default function Act4Leak() {
               Investigate this file
             </button>
             <button
-              onClick={stage}
+              onClick={() => {
+                setItem(null);
+                setPick(null);
+              }}
               className="rounded-md border border-[var(--btn-ghost-border)] px-3.5 py-2 text-sm transition-colors duration-fast hover:border-ink-faint"
             >
               Recover a different copy
