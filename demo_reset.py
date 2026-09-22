@@ -29,6 +29,9 @@ DOC = ROOT / "demo-docs" / "tender-evaluation.pdf"
 FALLBACK_DOC = ROOT / "spike" / "out" / "original.pdf"
 
 RECIPIENTS = ["alice", "bob", "carol", "dave", "erin"]
+# CLI ground truth only. The UI's Act 4 lets the operator choose the leaker
+# (or randomise), so this fixes the answer for `pqfw investigate` against the
+# seeded demo/ directory and nothing else.
 LEAKER = "carol"
 
 

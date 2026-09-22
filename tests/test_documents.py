@@ -223,3 +223,46 @@ def test_stage_leak_does_not_reveal_source(client):
             f"stage-leak response leaked recipient '{n}': {blob}")
     assert "ledger_index" not in r.json()
     assert "user_id" not in r.json()
+
+
+UPLOAD_DOC = ROOT / "demo-docs" / "board-inquiry.pdf"
+
+
+@pytest.mark.slow
+def test_chosen_leaker_is_correctly_attributed(tmp_path):
+    """Choose each recipient in turn; attribution must name that person.
+
+    Runs against the engine directly rather than the API so it does not
+    depend on demo state. This is the feature's central claim: the operator's
+    choice and the system's independent verdict agree, for every recipient,
+    without the verdict path ever seeing the choice.
+    """
+    import shutil
+
+    from pqfw import pipeline
+    from pqfw.forensics.investigate import Outcome, investigate
+    from pqfw.identity import Keystore
+    from pqfw.ledger.node import LedgerNode
+
+    if not UPLOAD_DOC.exists():
+        pytest.skip("run: python spike/make_upload_doc.py demo-docs/board-inquiry.pdf")
+
+    users = ["alice", "bob", "carol", "dave", "erin"]
+    ks = Keystore(tmp_path / "keys")
+    idents = [ks.create(u) for u in users]
+    led = LedgerNode(tmp_path / "l.db")
+
+    bundle = tmp_path / "b.pqfw"
+    pipeline.encrypt(UPLOAD_DOC, idents, bundle)
+    for u in users:
+        pipeline.decrypt(bundle, u, ks, led, tmp_path / f"{u}.pdf")
+
+    for chosen in users:
+        surfaced = tmp_path / "surfaced.pdf"
+        shutil.copy(tmp_path / f"{chosen}.pdf", surfaced)
+        v = investigate(surfaced, led)
+        assert v.outcome is Outcome.IDENTIFIED, f"{chosen}: {v.outcome} {v.notes}"
+        assert v.recipient_user_id == chosen
+        assert v.cryptographically_verified
+
+    led.close()
